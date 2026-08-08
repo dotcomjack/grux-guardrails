@@ -202,6 +202,24 @@ final class SecretRedactorTests: XCTestCase {
         XCTAssertFalse(out.contains("MIIEvQIBADANBgkq"), "truncated key body survived: \(out)")
     }
 
+    /// Regression, and a denial-of-service one. The first attempt at the PEM fix used a
+    /// lazy `[\s\S]*?` scan to the first END marker, which is O(n^2) on input carrying
+    /// many BEGIN markers and no END: every marker rescans the remainder of the document.
+    /// A 1.2MB hostile page took 72 seconds, which is a hang, and this library's whole
+    /// job is processing untrusted input that somebody else composed.
+    ///
+    /// The budget here is deliberately loose. It is not a benchmark, it is a tripwire for
+    /// anyone who reintroduces an unbounded scan.
+    func testPathologicalInputDoesNotHang() {
+        let hostile = String(
+            repeating: "-----BEGIN RSA PRIVATE KEY-----\nAAAAAAAAAAAAAAA\n/var/folders/x/y_z1/T/ text\n",
+            count: 12_000)
+        let started = Date()
+        _ = SecretRedactor.redact(hostile)
+        let elapsed = Date().timeIntervalSince(started)
+        XCTAssertLessThan(elapsed, 5.0, "redact() took \(elapsed)s on \(hostile.count) chars, likely an unbounded scan")
+    }
+
     func testTwoAdjacentPEMBlocksStaySeparate() {
         let two = """
         -----BEGIN EC PRIVATE KEY-----
