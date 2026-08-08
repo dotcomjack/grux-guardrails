@@ -1,8 +1,50 @@
 # Changelog
 
+## 0.4.0
+
+**Use this one.** Every earlier tag leaks credentials, see below.
+
+Fixes what a fourth adversarial audit found in 0.3.1. The theme is that two rounds of
+tuning one number could not solve the problem, because the number was the wrong dial.
+
+- **Secrets are now recognised by their label.** `HF_TOKEN=`, `AWS_SECRET_ACCESS_KEY=`,
+  `"api_key":` and friends have their value redacted regardless of its length or shape.
+  This replaces two failed attempts: a 40-character floor that leaked every `NAME=value`
+  secret shorter than that, and a 32-character floor that started eating ordinary
+  identifiers like `kCVPixelFormatType_32BGRA_FullRange`.
+- **The path heuristic was discarding real keys.** It rejected any token with one segment
+  under four characters, which base64 produces by chance. Measured over 200,000 random
+  AWS secret access keys it threw away 14% of them, rising to 34% at session-token
+  length. It now requires two independent signals. Measured leak rate for that credential
+  is now 0%.
+- **Private keys inside JSON now lose their bodies.** Where newlines are escaped as
+  `\n`, as in a GCP service account file, the line-based pattern matched only the header
+  and let 4 of 25 body lines reach the model behind a `[REDACTED:PEM]` tag.
+- **Named cloud metadata endpoints are denied.** `metadata.google.internal`,
+  `host.docker.internal`, `kubernetes.default.svc` and others were reachable. The IP was
+  blocked and the name, which is the form everybody actually types, was not.
+- **Six providers the generic pass structurally cannot see**: HuggingFace and Shopify
+  tokens carry no digit or are single case, so no entropy rule reaches them without
+  eating ordinary text. Added as explicit patterns, along with GitLab, npm, DigitalOcean
+  and SendGrid.
+- **A test that pinned a leak as correct behaviour has been rewritten.** It asserted
+  `redact(s) == s` against a live-shaped bearer token, so the next person to fix the leak
+  would have had to delete an assertion that looked deliberate.
+- **A performance regression, caught before release.** The first version of the label
+  pattern opened with a wildcard before its alternation and cost 0.711s on 760KB of
+  ordinary prose containing no secrets. Anchoring on the keyword brought that to 0.076s.
+
+## 0.3.1
+
+**Superseded and unsafe, do not use.** Fixes label-swallowing, the NAT64 local-use
+prefix, and version signposting. Its one functional change traded a cosmetic complaint
+for a security regression: every `NAME=value` secret shorter than 40 characters went out
+in plaintext, and a test was added that pinned the leak as correct. Both fixed in 0.4.0.
+
 ## 0.3.0
 
-**Use this one.** Earlier tags leak credentials, see below.
+**Superseded and unsafe, do not use.** It allows `64:ff9b:1::` straight to loopback, and
+the path heuristic added here discards 14% of AWS secret access keys.
 
 Fixes seven regressions that the 0.2.x security fixes introduced. They were found by
 attacking the fixed code on the assumption that a fix is the most likely place for the

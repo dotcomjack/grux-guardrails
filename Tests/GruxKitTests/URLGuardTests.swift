@@ -358,3 +358,21 @@ extension URLGuardTests {
         XCTAssertTrue(URLGuard.evaluate("http://[64:ff9b:1::0808:0808]/").isAllowed)
     }
 }
+
+extension URLGuardTests {
+    /// The IP rules already denied 169.254.169.254, but the NAME is the form that
+    /// actually appears in prompts, docs and SDK samples. Blocking only the numeric
+    /// spelling blocks the one nobody types.
+    func testCloudAndContainerMetadataHostnamesAreDenied() {
+        for h in ["http://metadata.google.internal/computeMetadata/v1/",
+                  "http://metadata.goog/", "http://metadata/",
+                  "http://host.docker.internal:8080/", "http://gateway.docker.internal/",
+                  "http://instance-data/", "http://kubernetes.default.svc/api/"] {
+            XCTAssertFalse(URLGuard.evaluate(h).isAllowed, "reachable: \(h)")
+            XCTAssertEqual(URLGuard.evaluate(h).tag, "PRIVATE_NETWORK", "wrong tag: \(h)")
+        }
+        // A real public host that merely contains one of those words stays allowed.
+        XCTAssertTrue(URLGuard.evaluate("https://metadata.example.com/").isAllowed)
+        XCTAssertTrue(URLGuard.evaluate("https://internal.example.com/").isAllowed)
+    }
+}
