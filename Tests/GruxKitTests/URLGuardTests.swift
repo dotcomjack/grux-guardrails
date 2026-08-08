@@ -345,3 +345,15 @@ final class URLGuardTests: XCTestCase {
         XCTAssertNil(URLGuard.evaluate("https://example.com/").tag)
     }
 }
+
+extension URLGuardTests {
+    /// RFC 8215 local-use NAT64 prefix. Only the RFC 6052 well-known prefix was decoded,
+    /// so 64:ff9b:1::7f00:1 reached loopback on any host running a local NAT64.
+    func testNAT64LocalUsePrefixIsDecoded() {
+        XCTAssertFalse(URLGuard.evaluate("http://[64:ff9b:1::7f00:1]/").isAllowed)
+        XCTAssertFalse(URLGuard.evaluate("http://[64:ff9b:1::a9fe:a9fe]/").isAllowed)
+        XCTAssertFalse(URLGuard.evaluate("http://[64:ff9b::7f00:1]/").isAllowed)
+        // Wrapping a public IPv4 stays allowed through either prefix.
+        XCTAssertTrue(URLGuard.evaluate("http://[64:ff9b:1::0808:0808]/").isAllowed)
+    }
+}

@@ -19,8 +19,14 @@ promised as shipped that is not.
 ## Install
 
 ```swift
-.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.1.0")
+.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.3.0")
 ```
+
+**Use 0.3.0 or later.** Every earlier tag is still resolvable and every earlier tag leaks
+credentials: 0.1.0 passes private key bodies straight through to the model and has a
+forgeable injection fence, and 0.2.x leaks the AWS secret access key. They are left
+published so existing checkouts do not break, and documented in
+[CHANGELOG.md](CHANGELOG.md) so nobody adopts one by accident.
 
 Pre-1.0, so treat the minor version as breaking. Pin exactly if that matters to you.
 
@@ -99,8 +105,18 @@ act on, and it is not a substitute for withholding capabilities the agent did no
 It is a matcher, not a parser, so it cannot catch a secret that does not look like one.
 A password, a session cookie with a short opaque value, an internal hostname, or a
 credential in a format no pattern covers all pass straight through. New providers appear
-constantly and this list will always trail them. It is the last line, not the only one,
-and it is not a reason to feed an agent credentials it did not need.
+constantly and this list will always trail them.
+
+**Single-case hex strings are deliberately exempt, and that is a real gap, not just a
+feature.** It is what keeps git SHAs, md5 and sha256 checksums intact, and those appear
+constantly in the logs and diffs an agent reads. The cost is that a 32 or 64 character
+lowercase-hex API secret, which several providers still issue, goes through untouched. It
+is a tradeoff and I would make it again, but you should know which side of it you are on.
+If your stack uses hex secrets, add a pattern for them rather than relying on the generic
+pass.
+
+It is the last line, not the only one, and it is not a reason to feed an agent credentials
+it did not need.
 
 ## URLGuard
 
@@ -154,14 +170,33 @@ and nothing here will see it. **You must re-evaluate every hop.** With `URLSessi
 means refusing the redirect in the delegate:
 
 ```swift
-func urlSession(_ s: URLSession, task: URLSessionTask,
-                willPerformHTTPRedirection r: HTTPURLResponse,
-                newRequest: URLRequest,
-                completionHandler: @escaping (URLRequest?) -> Void) {
-    let next = newRequest.url?.absoluteString ?? ""
-    completionHandler(URLGuard.evaluate(next, config: config).isAllowed ? newRequest : nil)
+final class GuardedRedirects: NSObject, URLSessionTaskDelegate {
+    let config: URLGuardConfig
+    private(set) var blocked: URLGuardDecision?
+    init(config: URLGuardConfig) { self.config = config }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        let next = newRequest.url?.absoluteString ?? ""
+        let decision = URLGuard.evaluate(next, config: config)
+        guard decision.isAllowed else {
+            blocked = decision
+            completionHandler(nil)   // refuses the hop, but the task still SUCCEEDS
+            task.cancel()            // this is what makes the caller see a failure
+            return
+        }
+        completionHandler(newRequest)
+    }
 }
 ```
+
+**The `task.cancel()` is not optional.** Passing `nil` to the completion handler refuses
+the redirect, and then the task completes normally carrying the 302's own body and no
+error. The overwhelmingly common Swift shape is `if let error { handle } else { trust }`,
+so a caller written that way treats a blocked SSRF attempt as a successful fetch, which is
+worse than not checking at all because it looks like the guard worked.
 
 **It does not resolve DNS, so it cannot stop rebinding.** `totally-fine.com` is allowed
 here and is free to resolve to `10.0.0.5`, and it can return a different answer on the

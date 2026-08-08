@@ -350,9 +350,17 @@ public enum URLGuard {
         let first10Zero = bytes[0..<10].allSatisfy { $0 == 0 }
         let mapped = first10Zero && bytes[10] == 0xff && bytes[11] == 0xff
         let compatible = first10Zero && bytes[10] == 0 && bytes[11] == 0
-        let nat64 = bytes[0] == 0x00 && bytes[1] == 0x64
+        // RFC 6052 well-known prefix 64:ff9b::/96, and RFC 8215 local-use 64:ff9b:1::/48.
+        // Only the first was handled, so 64:ff9b:1::7f00:1 reached loopback on any host
+        // running a local NAT64. Both are translation prefixes and both end in the
+        // target IPv4, so both get judged by it.
+        let nat64WellKnown = bytes[0] == 0x00 && bytes[1] == 0x64
             && bytes[2] == 0xff && bytes[3] == 0x9b
             && bytes[4..<12].allSatisfy { $0 == 0 }
+        let nat64LocalUse = bytes[0] == 0x00 && bytes[1] == 0x64
+            && bytes[2] == 0xff && bytes[3] == 0x9b
+            && bytes[4] == 0x00 && bytes[5] == 0x01
+        let nat64 = nat64WellKnown || nat64LocalUse
         if mapped || compatible || nat64 {
             let v4 = (Int(bytes[12]), Int(bytes[13]), Int(bytes[14]), Int(bytes[15]))
             if let reason = privateIPv4Reason(v4) {
