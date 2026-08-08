@@ -68,6 +68,13 @@ prompt. The fence does not make injection impossible. It gives the model a bound
 can act on, which is strictly better than concatenation and is not a substitute for not
 handing the agent capabilities it did not need.
 
+### What it does not do
+
+It is a matcher, not a parser, so it cannot catch a secret that does not look like one.
+A password, a session cookie with a short opaque value, an internal hostname, or a private
+key pasted without its PEM header all pass straight through. It is the last line, not the
+only one, and it is not a reason to feed an agent credentials it did not need.
+
 ## URLGuard
 
 The threat is server-side request forgery with a language model as the confused deputy.
@@ -111,14 +118,47 @@ your own auditing around it.
 
 ### What it does not do
 
-It cannot deny a dotted name with a made-up TLD (`host.corp`, `sub.media-server`),
-because that is textually indistinguishable from a public domain without a resolver or a
-public-suffix list, and this evaluator is deliberately offline. If your network hands out
-dotted internal names, put them on the denylist. There is a test pinning this limitation
-so it cannot quietly change.
+Read this part. A guard whose limits you do not know is worse than no guard, because you
+stop looking.
 
-`trustedLANHosts` ships **empty**. A default naming somebody's hardware would be a hole
-in your network rather than a convenience, so name your own.
+**It does not follow redirects, and that is the biggest gap.** `evaluate` judges one
+string. A perfectly public URL is free to answer `302 Location: http://127.0.0.1:8080/`,
+and nothing here will see it. **You must re-evaluate every hop.** With `URLSession` that
+means refusing the redirect in the delegate:
+
+```swift
+func urlSession(_ s: URLSession, task: URLSessionTask,
+                willPerformHTTPRedirection r: HTTPURLResponse,
+                newRequest: URLRequest,
+                completionHandler: @escaping (URLRequest?) -> Void) {
+    let next = newRequest.url?.absoluteString ?? ""
+    completionHandler(URLGuard.evaluate(next, config: config).isAllowed ? newRequest : nil)
+}
+```
+
+**It does not resolve DNS, so it cannot stop rebinding.** `totally-fine.com` is allowed
+here and is free to resolve to `10.0.0.5`, and it can return a different answer on the
+second lookup than it gave on the first. Closing that properly means resolving, pinning
+the address, checking the address rather than the name, and connecting to the pinned one.
+That needs a real network stack and is out of scope for a pure evaluator. If you are
+fetching genuinely hostile URLs, put an egress proxy or a firewall rule behind this, not
+just this.
+
+**It cannot detect a dotted name with a private TLD** (`host.corp`, `sub.media-server`),
+because that is textually indistinguishable from a public domain without a resolver or a
+public-suffix list. Put yours on the denylist. There is a test pinning this so it cannot
+change quietly.
+
+**`trustedLANHosts` ships empty.** A default naming somebody's hardware would be a hole in
+your network rather than a convenience, so name your own.
+
+What it *does* cover is the string-level evasion, which is the part people get wrong by
+hand: every IP spelling in the table above, credential smuggling, and percent-decoded
+hosts. That last one was found by adversarial probing before the first release rather than
+after it. `URL.host` percent-decodes, so `127.0.0.1%00.example.com` arrives carrying a
+literal NUL byte, parses as an ordinary multi-label name, and reads as plain loopback to
+any resolver that truncates at NUL. It is denied now, on structural grounds, with a
+regression test.
 
 ## Roadmap
 
