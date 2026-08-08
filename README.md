@@ -22,6 +22,8 @@ promised as shipped that is not.
 .package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.1.0")
 ```
 
+Pre-1.0, so treat the minor version as breaking. Pin exactly if that matters to you.
+
 ```swift
 .target(name: "YourAgent", dependencies: [.product(name: "GruxKit", package: "grux-kit")])
 ```
