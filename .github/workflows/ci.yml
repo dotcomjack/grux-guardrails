@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build -v
+      - name: Test
+        run: swift test -v
+
+  house-style:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Em dashes and en dashes are banned in this repo, including in comments and
+      # docs. Cheap to check, annoying to fix after the fact.
+      - name: No em dashes or en dashes
+        run: |
+          if grep -rnP '[\x{2013}\x{2014}]' --include='*.swift' --include='*.md' --include='*.yml' .; then
+            echo "::error::found an em dash or en dash, use a comma, colon or full stop"
+            exit 1
+          fi
+          echo "clean"
