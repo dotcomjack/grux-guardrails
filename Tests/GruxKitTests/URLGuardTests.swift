@@ -250,6 +250,42 @@ final class URLGuardTests: XCTestCase {
         XCTAssertTrue(isAllowed("https://api.corp.example/", config: config))
     }
 
+    /// Regression. `URL.host` is already punycoded, so an internationalized denylist
+    /// entry was compared raw against "xn--r8jz45g.jp" and matched nothing. The entry
+    /// failed OPEN while looking perfectly correct at the call site, which is the same
+    /// bug class the canonicalisation fix was written to eliminate.
+    func testInternationalizedDenylistEntriesMatch() {
+        let config = URLGuardConfig(denylist: ["例え.jp"])
+        XCTAssertFalse(isAllowed("https://例え.jp/", config: config))
+        XCTAssertFalse(isAllowed("https://xn--r8jz45g.jp/", config: config))
+        XCTAssertFalse(isAllowed("https://sub.例え.jp/", config: config))
+    }
+
+    /// Regression. canonicalEntry("") and canonicalEntry(".") both reduce to "", so
+    /// without a guard a blank line in a config file becomes a trusted-host entry.
+    func testBlankTrustedLANEntriesMatchNothing() {
+        for junk in ["", ".", "  ", "\n", "..."] {
+            let config = URLGuardConfig(trustedLANHosts: [junk])
+            XCTAssertFalse(isAllowed("http://127.0.0.1/", config: config))
+            XCTAssertFalse(isAllowed("http://router/", config: config))
+        }
+    }
+
+    /// Regression. The IPv4 table grew but `tag` did not, so the newest SSRF denials
+    /// reported as generic URL_DENIED. An alert keyed on PRIVATE_NETWORK, which is what
+    /// the README tells you to log, silently stopped seeing them.
+    func testEveryPrivateNetworkDenialCarriesThePrivateNetworkTag() {
+        let shouldBePrivate = [
+            "http://192.0.0.192/", "http://255.255.255.255/", "http://224.0.0.1/",
+            "http://0.1.2.3/", "http://198.18.0.1/", "http://192.0.2.1/",
+            "http://203.0.113.1/", "http://240.0.0.1/", "http://[fec0::1]/",
+            "http://[2002:7f00:1::]/", "http://192.168.1.1/", "http://localhost/",
+        ]
+        for u in shouldBePrivate {
+            XCTAssertEqual(URLGuard.evaluate(u).tag, "PRIVATE_NETWORK", "wrong tag for \(u)")
+        }
+    }
+
     // MARK: - The rest of the special-purpose registry
 
     /// Everything outside the covered ranges is treated as public internet, so anything
