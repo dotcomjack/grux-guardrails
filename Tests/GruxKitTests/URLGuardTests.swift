@@ -185,6 +185,41 @@ final class URLGuardTests: XCTestCase {
         XCTAssertTrue(isAllowed("http://8.8.8.8/"))
     }
 
+    // MARK: - Percent-decoded host smuggling
+
+    /// Regression, found by adversarial probing before the first public release.
+    ///
+    /// `URL.host` percent-decodes, so these arrive as hosts containing a literal NUL
+    /// byte or a literal slash. Both used to parse as ordinary multi-label names and
+    /// were ALLOWED, while any resolver that truncates at NUL reads them as plain
+    /// loopback. Structural validation of the decoded host is what closes it.
+    func testPercentDecodedHostCannotSmuggleALoopbackTarget() {
+        XCTAssertFalse(isAllowed("http://127.0.0.1%00.example.com/"))
+        XCTAssertFalse(isAllowed("http://127.0.0.1%2f.example.com/"))
+        XCTAssertFalse(isAllowed("http://127.0.0.1%09.example.com/"))
+        XCTAssertFalse(isAllowed("http://169.254.169.254%00.example.com/"))
+        // The denial is structural, so it is reported as such rather than as a
+        // private-network hit.
+        XCTAssertEqual(URLGuard.evaluate("http://127.0.0.1%00.example.com/").tag, "URL_DENIED")
+    }
+
+    /// Percent-decoding that produces a perfectly ordinary host is fine, and must stay
+    /// fine, because over-denying here would break real URLs. `evil%2ecom` decodes to
+    /// `evil.com` and is then matched by the denylist on its decoded form, which is the
+    /// behaviour we want.
+    func testHarmlessPercentDecodingStillWorks() {
+        XCTAssertTrue(isAllowed("http://evil%2ecom/"))
+        XCTAssertFalse(isAllowed("http://evil%2ecom/", config: URLGuardConfig(denylist: ["evil.com"])))
+    }
+
+    /// Non-ASCII hosts are NOT structurally illegal. A unicode homograph is a phishing
+    /// problem, not a network-reachability one, and denying it here would be a false
+    /// positive in a guard that is only supposed to answer "can this reach my LAN".
+    func testUnicodeHostsAreNotRejectedByStructuralValidation() {
+        XCTAssertTrue(isAllowed("http://ex\u{0430}mple.com/"))   // cyrillic a
+        XCTAssertTrue(isAllowed("http://xn--80ak6aa92e.com/"))   // punycode
+    }
+
     // MARK: - Case handling
 
     func testHostMatchingIsCaseInsensitive() {

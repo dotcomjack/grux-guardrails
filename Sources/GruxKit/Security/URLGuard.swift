@@ -105,6 +105,23 @@ public enum URLGuard {
         var host = rawHost.lowercased()
         if host.hasSuffix(".") { host = String(host.dropLast()) }
 
+        // Structural validation, and it has to happen here rather than later.
+        //
+        // `URL.host` percent-DECODES, so "127.0.0.1%00.example.com" arrives as a host
+        // containing a literal NUL byte and "127.0.0.1%2f.example.com" arrives with a
+        // literal slash. Both parse as ordinary multi-label names, both sail past every
+        // check below, and both are read as plain "127.0.0.1" by any resolver that
+        // truncates at NUL or at the path separator. That is the classic null-byte SSRF.
+        //
+        // No legitimate hostname contains these characters, so fail closed rather than
+        // trying to guess which downstream client will truncate where. Letters outside
+        // ASCII are deliberately still permitted, because a raw unicode host is a
+        // phishing concern rather than a network-reachability one and denying it here
+        // would be a false positive.
+        if host.unicodeScalars.contains(where: { isStructurallyIllegalInHost($0) }) {
+            return .denied(reason: "illegal character in host")
+        }
+
         // Denylist wins over everything past the credential check.
         if matches(host: host, list: config.denylist) {
             return .denied(reason: "host on user denylist")
@@ -119,6 +136,22 @@ public enum URLGuard {
         }
 
         return .allowed
+    }
+
+    /// Characters that can never appear in a real hostname and therefore indicate
+    /// smuggling: control codes including NUL, whitespace, and the delimiters that
+    /// separate a host from the rest of a URL.
+    ///
+    /// `%` and `:` stay legal because a zone-indexed IPv6 literal ("fe80::1%en0")
+    /// carries both after decoding, and that path is classified properly further down.
+    private static func isStructurallyIllegalInHost(_ s: Unicode.Scalar) -> Bool {
+        if s.value < 0x21 || s.value == 0x7F { return true }   // controls, NUL, space, DEL
+        switch s {
+        case "/", "\\", "@", "?", "#", "[", "]", "<", ">", "\"", "{", "}", "|", "^", "`":
+            return true
+        default:
+            return false
+        }
     }
 
     // MARK: - Host matching
