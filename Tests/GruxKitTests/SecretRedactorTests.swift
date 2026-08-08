@@ -423,7 +423,7 @@ final class ReadmeClaimsTests: XCTestCase {
         let count = table.ranges(of: try! Regex(#"\("[A-Z_0-9]+","#)).count
 
         let words = ["Twelve": 12, "Thirteen": 13, "Fourteen": 14, "Fifteen": 15,
-                     "Sixteen": 16, "Seventeen": 17, "Eighteen": 18, "Nineteen": 19, "Twenty": 20]
+                     "Sixteen": 16, "Seventeen": 17, "Eighteen": 18, "Nineteen": 19, "Twenty": 20, "Twenty-one": 21, "Twenty-two": 22, "Twenty-three": 23]
         let claimed = words.first { text.contains("\($0.key) patterns") }?.value
         XCTAssertEqual(claimed, count,
                        "README claims \(claimed.map(String.init) ?? "no") patterns, code has \(count)")
@@ -435,18 +435,35 @@ extension SecretRedactorTests {
     /// formed one 40+ run and the field NAME was swallowed with the value. The module's
     /// stated promise is that the model still sees the shape of the document, and losing
     /// the label is precisely that shape.
-    func testEqualsDoesNotSwallowTheFieldName() {
+    /// The label must survive AND the value must be redacted. An earlier version of this
+    /// test asserted `redact(s) == s` against a live-shaped bearer token, which pinned a
+    /// plaintext leak as desired behaviour and meant the next person to fix it had to
+    /// delete an assertion that looked deliberate. A test that locks in a leak is worse
+    /// than no test.
+    func testEqualsKeepsTheLabelAndRedactsTheValue() {
         let cases = [
             "Authorization=Bearer_abcdefghijklmnopqrstuvwxyz012345",
-            "CONTAINER_IMAGE_DIGEST=sha256_abcdefghijklmnopqrstuvwxyz",
+            "HF_TOKEN=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",
+            "TWILIO_AUTH=a1B2c3D4e5F6a7B8c9D0e1F2a3B4c5D6",
+            "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         ]
         for s in cases {
-            XCTAssertEqual(SecretRedactor.redact(s), s, "swallowed a label: \(s)")
+            let out = SecretRedactor.redact(s)
+            let label = String(s.prefix(upTo: s.firstIndex(of: "=")!))
+            let value = String(s.suffix(from: s.index(after: s.firstIndex(of: "=")!)))
+            XCTAssertTrue(out.hasPrefix(label + "="), "lost the label: \(out)")
+            XCTAssertFalse(out.contains(value), "value leaked in plaintext: \(out)")
+            XCTAssertTrue(out.contains("[REDACTED:"), "nothing redacted: \(out)")
         }
-        // A redaction inside a query string keeps the field name visible.
-        let q = SecretRedactor.redact("user=alice&session=" + String(repeating: "aB1", count: 20))
-        XCTAssertTrue(q.hasPrefix("user=alice&session="), "lost the field name: \(q)")
-        XCTAssertTrue(q.contains("[REDACTED:"))
+    }
+
+    /// A non-secret assignment must be left completely alone, or every config file an
+    /// agent reads turns to mush.
+    func testOrdinaryAssignmentsAreUntouched() {
+        for s in ["CONTAINER_IMAGE_DIGEST=sha256_abcdefghijklmnopqrstuvwxyz",
+                  "user=alice", "PATH=/usr/local/bin:/usr/bin", "LOG_LEVEL=debug"] {
+            XCTAssertEqual(SecretRedactor.redact(s), s, "mangled an ordinary assignment: \(s)")
+        }
     }
 
     /// Trailing base64 padding must still be consumed, or the redaction leaves a dangling
@@ -455,5 +472,51 @@ extension SecretRedactorTests {
         let b64 = "K7gN+U3vJ2p/QzXm5R8wYt1LcVfHbNdEjA9sKpMoQwE="
         let out = SecretRedactor.redact(b64)
         XCTAssertEqual(out, "[REDACTED:HIGH_ENTROPY]", "padding left behind: \(out)")
+    }
+}
+
+extension SecretRedactorTests {
+    /// Assigned secrets, the answer to a problem that two rounds of tuning the length
+    /// floor could not solve. At 40 characters every NAME=value secret under that length
+    /// leaked; at 32 the generic pass started eating kCVPixelFormatType_32BGRA_FullRange.
+    /// The label was the signal all along.
+    func testAssignedSecretsAreRedactedAcrossFormats() {
+        let cases = [
+            "HF_TOKEN=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",
+            "export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "TWILIO_AUTH=a1B2c3D4e5F6a7B8c9D0e1F2a3B4c5D6",
+            "{\"api_key\": \"abcdefghijklmnopqrstuvwxyz012345\"}",
+            "client_secret: abcdefghijklmnopqrstuvwxyz012345",
+            "?access_token=abcdefghijklmnopqrstuvwxyz012345",
+        ]
+        for s in cases {
+            let out = SecretRedactor.redact(s)
+            XCTAssertTrue(out.contains("[REDACTED:"), "not redacted: \(s) -> \(out)")
+        }
+    }
+
+    /// Providers whose tokens the generic pass structurally cannot reach, because they
+    /// carry no digit or are single case.
+    func testProvidersTheGenericPassCannotSee() {
+        for (input, tag) in [
+            ("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", "HUGGINGFACE_TOKEN"),
+            ("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", "SHOPIFY_TOKEN"),
+            ("glpat-ABCDEFGHIJ0123456789ab", "GITLAB_TOKEN"),
+        ] {
+            XCTAssertTrue(SecretRedactor.redact(input).contains("[REDACTED:\(tag)]"),
+                          "missed \(tag): \(input)")
+        }
+    }
+
+    /// A private key inside JSON, where every newline is the two characters backslash-n.
+    /// This is exactly the shape of a GCP service account key file, and reading one is an
+    /// ordinary thing to ask an agent to do. The line-based pattern matched only the
+    /// header and let 4 of 25 body lines through.
+    func testPEMInsideJSONLosesItsBody() {
+        let body = (0..<6).map { _ in "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDGx8kY3mVrZXlk" }
+            .joined(separator: "\\n")
+        let json = "{\"private_key\": \"-----BEGIN PRIVATE KEY-----\\n\(body)\\n-----END PRIVATE KEY-----\\n\"}"
+        let out = SecretRedactor.redact(json)
+        XCTAssertFalse(out.contains("MIIEvQIBADANBgkq"), "key body survived JSON encoding: \(out)")
     }
 }

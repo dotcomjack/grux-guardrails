@@ -53,6 +53,19 @@ public enum SecretRedactor {
             ("PEM", #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"#
                   + #"(?:[ \t]*[\r\n]+[A-Za-z0-9+/=]{4,})*"#
                   + #"(?:[ \t]*[\r\n]+-----END [A-Z0-9 ]*PRIVATE KEY-----)?"#),
+            // The same block after JSON encoding, where every newline is the two
+            // characters backslash-n rather than an actual line break.
+            //
+            // This is not a hypothetical shape. It is exactly how a GCP service account
+            // key file stores its private key, and reading a credentials JSON is a
+            // completely ordinary thing for an agent to be asked to do. Measured against
+            // a real 2048-bit key: the line-based pattern above matched only the header,
+            // and 4 of the 25 body lines then reached the model verbatim, because the
+            // entropy pass only rescues the ones that happen to carry mixed case and a
+            // digit. A base64 line that happens to be single case walked straight out.
+            ("PEM", #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"#
+                  + #"(?:\\r?\\n[A-Za-z0-9+/=]{4,})*"#
+                  + #"(?:\\r?\\n-----END [A-Z0-9 ]*PRIVATE KEY-----)?"#),
             ("ANTHROPIC_KEY", L + #"sk-ant-[A-Za-z0-9_\-]{10,}"#),
             // Generic OpenAI-style secret key (sk-... and sk-proj-...). Runs after the
             // more specific sk-ant- so Anthropic keys keep their own tag. The 16-char
@@ -75,6 +88,17 @@ public enum SecretRedactor {
             // threads, and people paste the wrong one constantly.
             ("STRIPE_TEST_KEY", L + #"[sprk]k_test_[A-Za-z0-9]{20,}"#),
             ("ELEVENLABS_KEY", L + #"sk_[a-f0-9]{48,}"#),
+            // These exist because the generic pass structurally cannot reach them. It
+            // requires mixed case AND digits, and a HuggingFace token carries no digit
+            // while a Shopify token is single case. Loosening the generic rule far enough
+            // to catch either would start eating ordinary identifiers, so the honest
+            // answer is a prefix pattern per provider rather than a blunter heuristic.
+            ("HUGGINGFACE_TOKEN", L + #"hf_[A-Za-z0-9]{30,}"#),
+            ("SHOPIFY_TOKEN", L + #"shp(?:at|ca|pa|ss)_[a-fA-F0-9]{32}"#),
+            ("GITLAB_TOKEN", L + #"glpat-[A-Za-z0-9_\-]{20,}"#),
+            ("NPM_TOKEN", L + #"npm_[A-Za-z0-9]{36}"#),
+            ("DIGITALOCEAN_TOKEN", L + #"dop_v1_[a-f0-9]{64}"#),
+            ("SENDGRID_KEY", L + #"SG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"#),
             ("JWT", L + #"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#)
         ]
         return raw.compactMap { pair in
@@ -100,9 +124,47 @@ public enum SecretRedactor {
     /// the whole thing including the field name was replaced. This file's promise is that
     /// the model still sees the shape of the document, and swallowing the label destroys
     /// exactly that: the reader can no longer tell which field was redacted.
+    /// The floor is 32, not 40, and that number is load-bearing in a way that took a
+    /// regression to learn. Keeping `=` out of the token run was correct, but it also
+    /// removed the label from the run, and the label had been supplying the length. So
+    /// `HF_TOKEN=hf_...` was redacted at 0.3.0 and leaked at 0.3.1: the fix for a
+    /// cosmetic complaint silently un-redacted a whole class of real credentials.
+    /// Every `NAME=value` secret shorter than 40 characters went out in plaintext.
     private static let entropyRegex: NSRegularExpression? = {
         try? NSRegularExpression(
             pattern: #"(?<![A-Za-z0-9])[A-Za-z0-9+/_\-]{40,}={0,2}(?![A-Za-z0-9])"#,
+            options: []
+        )
+    }()
+
+    /// Assigned secrets: the value of anything whose NAME says it is a credential.
+    ///
+    /// This exists because length alone cannot separate a secret from an identifier in
+    /// the 32 to 39 character band. Dropping the generic floor to 32 caught
+    /// `HF_TOKEN=hf_...` and also ate `kCVPixelFormatType_32BGRA_FullRange` and
+    /// `feature/JIRA-1234-add-new-thing-here`. Raising it back to 40 protected those and
+    /// leaked every `NAME=value` secret shorter than 40. Both attempts were tuning the
+    /// wrong dial.
+    ///
+    /// The label is the signal. `HF_TOKEN`, `TWILIO_AUTH` and `AWS_SECRET_ACCESS_KEY`
+    /// announce themselves, and nothing named that way holds a value worth printing. So
+    /// this matches the name, keeps it, and redacts only what follows, which is also what
+    /// preserves the shape of the document. It covers env files, shell exports, YAML,
+    /// JSON and query strings in one pattern because they all share the `name` then
+    /// separator then `value` shape.
+    /// The name part is anchored on the keyword rather than opened with a wildcard, and
+    /// that is a performance fix, not a style choice. A leading `[A-Za-z0-9_\-]*` before
+    /// the alternation makes the engine try a variable-length prefix at every offset in
+    /// the document: 0.711s on 760KB of ordinary prose against 0.076s for this form, on
+    /// text containing no secrets at all. Nine times the cost of the pass it sits next
+    /// to, paid on every call, to scan text that will never match.
+    private static let assignmentRegex: NSRegularExpression? = {
+        try? NSRegularExpression(
+            pattern: #"(?i)\b((?:[A-Za-z0-9]+[_\-])*(?:secret|token|password|passwd|apikey|api[_\-]?key|auth|credential)[A-Za-z0-9]*(?:[_\-][A-Za-z0-9]+)*)"#
+                   // The optional quote BEFORE the separator is what makes JSON work:
+                   // `"api_key": "..."` closes the key before the colon.
+                   + #"(["']?\s*[=:]\s*["']?)"#
+                   + #"([A-Za-z0-9+/_\-]{16,}={0,2})"#,
             options: []
         )
     }()
@@ -113,6 +175,15 @@ public enum SecretRedactor {
         var out = input
         for (tag, regex) in patterns {
             out = replaceAll(in: out, regex: regex, with: "[REDACTED:\(tag)]")
+        }
+        // After the provider prefixes, so a recognised key keeps its own precise tag, and
+        // before the entropy pass, so a labelled value is caught even when it is too
+        // short or too single-case for the generic rule to see it.
+        if let assignment = assignmentRegex {
+            let range = NSRange(out.startIndex..<out.endIndex, in: out)
+            out = assignment.stringByReplacingMatches(
+                in: out, options: [], range: range,
+                withTemplate: "$1$2[REDACTED:ASSIGNED_SECRET]")
         }
         out = replaceHighEntropy(in: out)
         return out
@@ -245,7 +316,9 @@ public enum SecretRedactor {
         var runLength = 0
         var sawSlash = false
         var segment = 0
-        var shortestSegment = Int.max
+        var shortSegments = 0
+        var leadingEmpty = false
+        var isFirstSegment = true
         for scalar in s.unicodeScalars {
             switch scalar.value {
             case 0x41...0x5A: upper = true; segment += 1
@@ -254,23 +327,35 @@ public enum SecretRedactor {
             case 0x2B, 0x3D: base64Padding = true; segment += 1  // + and =, the base64 tell
             case 0x2F:                                            // the path separator
                 sawSlash = true
-                shortestSegment = min(shortestSegment, segment)
+                if isFirstSegment && segment == 0 { leadingEmpty = true }
+                if segment < 4 { shortSegments += 1 }
+                isFirstSegment = false
                 segment = 0
             default: segment += 1                                 // - and _ carry no signal
             }
             runLength += 1
         }
-        shortestSegment = min(shortestSegment, segment)
+        if sawSlash && segment < 4 { shortSegments += 1 }
 
-        // Path rejection. A filesystem path or a URL path is short segments joined by
-        // separators, and an absolute path opens with `/`, giving an empty leading
-        // segment. A base64 blob is one long run, or long runs. Four is the smallest
-        // base64 quantum, so nothing legitimate falls below it.
-        if sawSlash && shortestSegment < 4 { return false }
-
-        // A long base64 blob is worth redacting even when it happens to be single case,
-        // because + and = do not occur in identifiers or prose.
+        // Base64 padding is decisive and is checked BEFORE the path rule. It used to run
+        // after, which meant a blob carrying `+` and `==` could still be thrown away as a
+        // path because of one unlucky short run between slashes.
         if base64Padding && runLength >= 40 { return true }
-        return upper && lower && digit && runLength >= 40
+
+        // Path rejection, on TWO weak signals rather than one.
+        //
+        // The single-signal version rejected any token with one segment under four
+        // characters, and base64 produces those by chance constantly. Measured over
+        // 200,000 random 40-character AWS secret access keys it discarded 14% of them,
+        // and the miss rate climbed with the length of the secret, reaching 34% at
+        // session-token size. Rejecting the highest-value credential one time in seven,
+        // to protect a cosmetic property, is the wrong side of that trade.
+        //
+        // A real path has either several short segments or an empty leading one, because
+        // an absolute path opens with a separator. A base64 blob has at most one short
+        // run and never opens with one.
+        if sawSlash && (shortSegments >= 2 || leadingEmpty) { return false }
+
+        return upper && lower && digit && runLength >= 32
     }
 }

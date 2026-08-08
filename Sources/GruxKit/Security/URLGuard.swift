@@ -53,7 +53,7 @@ public enum URLGuardDecision: Equatable, Sendable {
         for needle in ["loopback", "private", "link-local", ".local", "intranet", "NAT",
                        "unspecified", "ambiguous", "multicast", "unparseable", "site-local",
                        "this-network", "protocol assignment", "documentation", "benchmark",
-                       "reserved", "broadcast", "6to4", "IPv6"] {
+                       "reserved", "broadcast", "6to4", "IPv6", "metadata"] {
             if reason.contains(needle) { return "PRIVATE_NETWORK" }
         }
         return "URL_DENIED"
@@ -153,6 +153,23 @@ public enum URLGuard {
         return .allowed
     }
 
+    /// Named metadata endpoints across the major clouds and container runtimes. Each of
+    /// these resolves to an address the IP rules already deny, so this list exists purely
+    /// because the name is what actually appears in prompts, docs and code.
+    private static let metadataHostnames: Set<String> = [
+        "metadata",                       // GCP short form, resolves via search domain
+        "metadata.google.internal",       // GCP
+        "metadata.goog",                  // GCP alternate
+        "instance-data",                  // AWS legacy
+        "instance-data.ec2.internal",     // AWS
+        "host.docker.internal",           // Docker Desktop, reaches the host
+        "gateway.docker.internal",        // Docker Desktop
+        "kubernetes.default.svc",         // in-cluster Kubernetes API
+        "kubernetes.default",
+        "metadata.platformequinix.com",
+        "169.254.169.254.nip.io",         // wildcard DNS that resolves to the metadata IP
+    ]
+
     /// Characters that can never appear in a real hostname and therefore indicate
     /// smuggling: control codes including NUL, whitespace, and the delimiters that
     /// separate a host from the rest of a URL.
@@ -241,6 +258,17 @@ public enum URLGuard {
         if host.contains(":") {
             return ipv6Reason(host)
         }
+
+        // Named cloud and container metadata endpoints. These resolve to the link-local
+        // and private addresses already denied above, so denying the IP felt like enough.
+        // It is not: the agent is far likelier to encounter the NAME, because that is the
+        // form every cloud tutorial, SDK and Stack Overflow answer uses. A guard that
+        // blocks 169.254.169.254 while allowing metadata.google.internal is blocking the
+        // spelling nobody types.
+        for suffix in [".internal", ".googleapis.internal", ".goog"] where host.hasSuffix(suffix) {
+            return "cloud or container metadata hostname"
+        }
+        if metadataHostnames.contains(host) { return "cloud or container metadata hostname" }
 
         // mDNS and Bonjour hosts are LAN by definition.
         if host.hasSuffix(".local") { return "mDNS .local host (LAN)" }

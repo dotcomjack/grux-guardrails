@@ -31,10 +31,10 @@ promised as shipped that is not.
 ## Install
 
 ```swift
-.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.3.0")
+.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.4.0")
 ```
 
-**Use 0.3.0 or later.** Every earlier tag is still resolvable and every earlier tag leaks
+**Use 0.4.0 or later.** Every earlier tag is still resolvable and every earlier tag leaks
 credentials: 0.1.0 passes private key bodies straight through to the model and has a
 forgeable injection fence, and 0.2.x leaks the AWS secret access key. They are left
 published so existing checkouts do not break, and documented in
@@ -58,7 +58,7 @@ let clean = SecretRedactor.redact(ocrText)
 // "deploy with sk-ant-api03-…"  ->  "deploy with [REDACTED:ANTHROPIC_KEY]"
 ```
 
-Sixteen patterns plus a generic high-entropy pass. Two properties are
+Twenty-three patterns plus a generic high-entropy pass. Two properties are
 load-bearing and both are pinned by tests:
 
 **Most specific wins.** A Stripe live key is tagged `[REDACTED:STRIPE_LIVE_SECRET]`, not
