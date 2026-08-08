@@ -40,7 +40,7 @@ let clean = SecretRedactor.redact(ocrText)
 // "deploy with sk-ant-api03-…"  ->  "deploy with [REDACTED:ANTHROPIC_KEY]"
 ```
 
-Seventeen provider-specific patterns plus a generic high-entropy pass. Two properties are
+Sixteen patterns plus a generic high-entropy pass. Two properties are
 load-bearing and both are pinned by tests:
 
 **Most specific wins.** A Stripe live key is tagged `[REDACTED:STRIPE_LIVE_SECRET]`, not
@@ -56,14 +56,22 @@ PEM blocks are consumed whole, header through footer, including a truncated bloc
 footer. Redacting the header alone would tag the block and then hand the model every byte
 of the key, which is the failure this library exists to prevent.
 
-The generic pass fires on a 32+ character run carrying mixed case **and** digits, or a
-40+ character run containing base64 padding. That rule exists because **a redactor that
-mangles ordinary text is a redactor people switch off**, and a switched-off redactor
-protects nothing. Mixed case with digits is what separates a random token from prose, an
-identifier, or a hex digest, and hex digests being single case by convention is exactly
-what keeps git SHAs and checksums intact. Absolute file paths, GitHub permalinks,
-kebab-case identifiers, md5 sums and fifty consecutive digits all pass through untouched,
-and there are tests asserting each one.
+The generic pass fires on a 40+ character run carrying mixed case **and** digits, or one
+containing base64 padding. That rule exists because **a redactor that mangles ordinary
+text is a redactor people switch off**, and a switched-off redactor protects nothing.
+Mixed case with digits is what separates a random token from prose, an identifier, or a
+hex digest, and hex digests being single case by convention is exactly what keeps git
+SHAs and checksums intact.
+
+Paths are excluded structurally rather than by dropping `/` from the alphabet, which
+matters more than it sounds. Dropping `/` was tried, and because standard base64 contains
+`/` it blinded the redactor to the AWS secret access key, which is the half of the AWS
+pair that actually grants access. Trading a cosmetic false positive for a total miss on
+the highest-value credential is a worse bug than the one it fixed. So instead: a token
+with any segment shorter than four characters is a path, because paths are short segments
+joined by separators and an absolute path opens with an empty one. Absolute paths, GitHub
+permalinks, DerivedData directories, kebab-case identifiers, md5 sums and fifty
+consecutive digits all pass through untouched, and there are tests asserting each one.
 
 There is also a fence for the injection half of the problem, which is a different problem
 from the secrets half:

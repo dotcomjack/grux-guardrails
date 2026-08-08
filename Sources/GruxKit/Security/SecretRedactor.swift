@@ -50,7 +50,7 @@ public enum SecretRedactor {
             // 72 seconds. This form does the same work in under 10 milliseconds, because
             // a body line that is not base64 stops the match immediately.
             ("PEM", #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"#
-                  + #"(?:[ \t]*[\r\n]+[A-Za-z0-9+/=]{16,})*"#
+                  + #"(?:[ \t]*[\r\n]+[A-Za-z0-9+/=]{4,})*"#
                   + #"(?:[ \t]*[\r\n]+-----END [A-Z0-9 ]*PRIVATE KEY-----)?"#),
             ("ANTHROPIC_KEY", L + #"sk-ant-[A-Za-z0-9_\-]{10,}"#),
             // Generic OpenAI-style secret key (sk-... and sk-proj-...). Runs after the
@@ -83,14 +83,20 @@ public enum SecretRedactor {
 
     /// Generic high-entropy run, executed LAST so the specific patterns get first crack.
     ///
-    /// `/` is deliberately NOT in this class. It used to be, and the result was that
-    /// `/var/folders/mn/2xk8h9_d3qz7fzz.../T/build.log` matched as ONE token and the
-    /// whole path was replaced, as was a GitHub permalink including its domain. A path
-    /// separator is structure, not secret material, so excluding it splits a path into
-    /// short segments that fall under the length floor on their own.
+    /// `/` IS in this class, and getting that wrong cost a real secret.
+    ///
+    /// It was removed once, to stop `/var/folders/mn/2xk8h9.../T/build.log` matching as
+    /// one token and being replaced whole. That fixed the paths and blinded the redactor
+    /// to standard base64, whose alphabet includes `/`. The AWS secret access key, which
+    /// is the half of the AWS pair that actually grants access, leaked completely.
+    ///
+    /// So `/` is back, and paths are excluded structurally instead, by `looksLikeASecret`
+    /// rejecting any token with a segment shorter than 4 characters. A path is short
+    /// segments joined by separators, and an absolute path starts with `/`, which is an
+    /// empty leading segment. A base64 blob is one long run, or long runs.
     private static let entropyRegex: NSRegularExpression? = {
         try? NSRegularExpression(
-            pattern: #"(?<![A-Za-z0-9])[A-Za-z0-9+=_\-]{32,}(?![A-Za-z0-9])"#,
+            pattern: #"(?<![A-Za-z0-9])[A-Za-z0-9+/=_\-]{40,}(?![A-Za-z0-9])"#,
             options: []
         )
     }()
@@ -136,7 +142,13 @@ public enum SecretRedactor {
     /// fence id in their system prompt. Prefer the random one everywhere else.
     public static func wrapAsUntrusted(_ kind: String, _ body: String, id: String) -> String {
         let safeKind = kind.filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
-        let safeID = id.filter { $0.isHexDigit }
+        // Do NOT silently strip non-hex characters. Doing that turned a caller's ordinary
+        // label, say "screen-capture", into id="ceecae": six characters, trivially
+        // guessable, which hands back the exact forgery this id exists to prevent, with
+        // no error and no warning. An id that is not already strong hex is hashed into
+        // one, so every caller gets a usable fence whatever they pass.
+        let hex = id.filter { $0.isHexDigit }
+        let safeID = (hex.count >= 12 && hex.count == id.count) ? hex : derivedID(from: id)
         // Belt and braces. The id alone already makes a forged closer useless, since the
         // attacker cannot guess it, but neutralising the literal keeps the transcript
         // readable and removes any doubt about what closed the block.
@@ -149,7 +161,20 @@ public enum SecretRedactor {
 
     /// 64 bits of unguessable fence id, rendered as hex.
     public static func newFenceID() -> String {
-        String(UInt64.random(in: UInt64.min...UInt64.max), radix: 16)
+        String(format: "%016lx", UInt64.random(in: UInt64.min...UInt64.max))
+    }
+
+    /// Deterministic 64-bit id for a caller-supplied label. FNV-1a, which is not a
+    /// cryptographic hash and is not pretending to be: a caller who passes a fixed label
+    /// has chosen a predictable fence and the doc comment says so. It exists so that a
+    /// non-hex label produces a full-width id instead of a six-character stub.
+    private static func derivedID(from s: String) -> String {
+        var h: UInt64 = 0xcbf29ce484222325
+        for b in Array(s.utf8) {
+            h ^= UInt64(b)
+            h = h &* 0x100000001b3
+        }
+        return String(format: "%016lx", h)
     }
 
     // MARK: - Internals
@@ -168,22 +193,33 @@ public enum SecretRedactor {
         let matches = regex.matches(in: input, options: [], range: range)
         guard !matches.isEmpty else { return input }
 
-        // Walk matches in reverse so earlier ranges stay valid as we mutate.
-        var result = input
-        for match in matches.reversed() {
-            guard let swiftRange = Range(match.range, in: result) else { continue }
-            let token = String(result[swiftRange])
+        // Single forward pass over NSString, which indexes UTF-16 in constant time.
+        //
+        // The previous version walked matches in reverse calling
+        // `Range(match.range, in: result)` and mutating a Swift String. That conversion
+        // is O(n) the moment the string is not all-ASCII, because Swift has to count
+        // grapheme clusters from the start to find a UTF-16 offset. So ONE curly
+        // apostrophe, emoji or non-breaking space anywhere in the input turned the whole
+        // pass quadratic: 296KB went from 0.030s to 1.970s, a 65x cliff, triggered by a
+        // character that appears in ordinary prose constantly.
+        let out = NSMutableString(capacity: nsInput.length)
+        var cursor = 0
+        for match in matches {
+            let token = nsInput.substring(with: match.range)
             // Defence in depth, not the active mechanism. Idempotence currently holds
-            // because no marker contains a 32-character run from the entropy class, so
+            // because no marker contains a 40-character run from the entropy class, so
             // this branch is unreachable today. It stays because the moment somebody
             // widens that class, it becomes the thing standing between this function and
             // eating its own output.
-            if token.hasPrefix("[REDACTED:") { continue }
-            if looksLikeASecret(token) {
-                result.replaceSubrange(swiftRange, with: "[REDACTED:HIGH_ENTROPY]")
-            }
+            let skip = token.hasPrefix("[REDACTED:") || !looksLikeASecret(token)
+            if skip { continue }
+            out.append(nsInput.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
+            out.append("[REDACTED:HIGH_ENTROPY]")
+            cursor = match.range.location + match.range.length
         }
-        return result
+        if cursor == 0 { return input }
+        out.append(nsInput.substring(from: cursor))
+        return out as String
     }
 
     /// The false-positive budget, and the single most delicate judgement in this file.
@@ -201,19 +237,34 @@ public enum SecretRedactor {
     private static func looksLikeASecret(_ s: String) -> Bool {
         var upper = false, lower = false, digit = false, base64Padding = false
         var runLength = 0
+        var sawSlash = false
+        var segment = 0
+        var shortestSegment = Int.max
         for scalar in s.unicodeScalars {
             switch scalar.value {
-            case 0x41...0x5A: upper = true
-            case 0x61...0x7A: lower = true
-            case 0x30...0x39: digit = true
-            case 0x2B, 0x3D: base64Padding = true   // + and =, the base64 tell
-            default: break                           // - and _ carry no signal
+            case 0x41...0x5A: upper = true; segment += 1
+            case 0x61...0x7A: lower = true; segment += 1
+            case 0x30...0x39: digit = true; segment += 1
+            case 0x2B, 0x3D: base64Padding = true; segment += 1  // + and =, the base64 tell
+            case 0x2F:                                            // the path separator
+                sawSlash = true
+                shortestSegment = min(shortestSegment, segment)
+                segment = 0
+            default: segment += 1                                 // - and _ carry no signal
             }
             runLength += 1
         }
+        shortestSegment = min(shortestSegment, segment)
+
+        // Path rejection. A filesystem path or a URL path is short segments joined by
+        // separators, and an absolute path opens with `/`, giving an empty leading
+        // segment. A base64 blob is one long run, or long runs. Four is the smallest
+        // base64 quantum, so nothing legitimate falls below it.
+        if sawSlash && shortestSegment < 4 { return false }
+
         // A long base64 blob is worth redacting even when it happens to be single case,
         // because + and = do not occur in identifiers or prose.
         if base64Padding && runLength >= 40 { return true }
-        return upper && lower && digit && runLength >= 32
+        return upper && lower && digit && runLength >= 40
     }
 }

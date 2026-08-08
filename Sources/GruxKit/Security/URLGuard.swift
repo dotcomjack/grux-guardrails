@@ -44,11 +44,17 @@ public enum URLGuardDecision: Equatable, Sendable {
         if reason.contains("credential") { return "CREDENTIAL_URL" }
         if reason.contains("denylist") { return "USER_DENYLIST" }
         if reason.contains("scheme") { return "BAD_SCHEME" }
-        if reason.contains("loopback") || reason.contains("private")
-            || reason.contains("link-local") || reason.contains(".local")
-            || reason.contains("intranet") || reason.contains("NAT")
-            || reason.contains("unspecified") || reason.contains("ambiguous")
-            || reason.contains("multicast") || reason.contains("unparseable") { return "PRIVATE_NETWORK" }
+        // Every reason produced by privateNetworkReason has to land here. When the IPv4
+        // table grew, these strings were not updated, so Oracle Cloud metadata and the
+        // broadcast address reported as generic URL_DENIED. An alert keyed on
+        // PRIVATE_NETWORK, which is what the README tells you to log, silently stopped
+        // seeing the newest SSRF denials.
+        for needle in ["loopback", "private", "link-local", ".local", "intranet", "NAT",
+                       "unspecified", "ambiguous", "multicast", "unparseable", "site-local",
+                       "this-network", "protocol assignment", "documentation", "benchmark",
+                       "reserved", "broadcast", "6to4", "IPv6"] {
+            if reason.contains(needle) { return "PRIVATE_NETWORK" }
+        }
         return "URL_DENIED"
     }
 }
@@ -131,7 +137,12 @@ public enum URLGuard {
         // Canonicalised like every other list, because a raw `contains` meant that the
         // one knob the README tells you that you MUST fill in yourself silently did
         // nothing if you happened to type a capital letter.
-        if config.trustedLANHosts.contains(where: { canonicalEntry($0) == host }) { return .allowed }
+        // The `!isEmpty` guard matters: canonicalEntry("") and canonicalEntry(".") both
+        // reduce to "", and without this a blank line in a config file would become a
+        // trusted-host entry that matches an empty host.
+        if config.trustedLANHosts.contains(where: { let e = canonicalEntry($0); return !e.isEmpty && e == host }) {
+            return .allowed
+        }
         if matches(host: host, list: config.allowlist) { return .allowed }
 
         if let reason = privateNetworkReason(host: host) {
@@ -183,6 +194,17 @@ public enum URLGuard {
         var e = entry.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         while e.hasSuffix(".") { e = String(e.dropLast()) }
         while e.hasPrefix(".") { e = String(e.dropFirst()) }
+        guard !e.isEmpty else { return "" }
+        // Internationalized entries have to be punycoded, because `URL.host` already is.
+        // A denylist of ["例え.jp"] was compared against the host "xn--r8jz45g.jp" and
+        // matched nothing, so the entry failed OPEN while looking perfectly correct at
+        // the call site. Round-tripping through URL performs the same IDNA conversion
+        // that produced the host in the first place.
+        if !e.allSatisfy({ $0.isASCII }) {
+            if let punycoded = URL(string: "http://\(e)")?.host?.lowercased() {
+                return punycoded
+            }
+        }
         return e
     }
 
