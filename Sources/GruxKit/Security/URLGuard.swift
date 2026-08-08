@@ -29,7 +29,7 @@ import Foundation
 ///
 /// `evaluate(_:config:)` is pure and synchronous, which is what makes the policy
 /// table-testable. Wire your own auditing around it.
-public enum URLGuardDecision: Equatable {
+public enum URLGuardDecision: Equatable, Sendable {
     case allowed
     case denied(reason: String)
 
@@ -53,7 +53,7 @@ public enum URLGuardDecision: Equatable {
     }
 }
 
-public struct URLGuardConfig: Equatable {
+public struct URLGuardConfig: Equatable, Sendable {
     /// Hosts (and their subdomains) that bypass the private-network checks.
     public var allowlist: [String]
     /// Hosts (and their subdomains) that are always denied. Beats everything below
@@ -128,7 +128,10 @@ public enum URLGuard {
         }
 
         // Trusted LAN hosts, then the allowlist, skip the private-network checks below.
-        if config.trustedLANHosts.contains(host) { return .allowed }
+        // Canonicalised like every other list, because a raw `contains` meant that the
+        // one knob the README tells you that you MUST fill in yourself silently did
+        // nothing if you happened to type a capital letter.
+        if config.trustedLANHosts.contains(where: { canonicalEntry($0) == host }) { return .allowed }
         if matches(host: host, list: config.allowlist) { return .allowed }
 
         if let reason = privateNetworkReason(host: host) {
@@ -161,12 +164,26 @@ public enum URLGuard {
     /// segment-aware rather than a substring test.
     private static func matches(host: String, list: [String]) -> Bool {
         for entry in list {
-            let e = entry.lowercased().trimmingCharacters(in: .whitespaces)
+            let e = canonicalEntry(entry)
             guard !e.isEmpty else { continue }
             if host == e { return true }
             if host.hasSuffix("." + e) { return true }
         }
         return false
+    }
+
+    /// Entries have to be canonicalised exactly the way hosts are, and a denylist makes
+    /// that non-negotiable: it fails OPEN when it fails to match.
+    ///
+    /// The old version trimmed `.whitespaces`, which does not include newlines, and
+    /// never stripped a trailing dot. So a denylist of `["evil.com."]`, or an entry read
+    /// from a config file with its line ending attached, silently matched nothing at all
+    /// while looking completely correct at the call site.
+    private static func canonicalEntry(_ entry: String) -> String {
+        var e = entry.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        while e.hasSuffix(".") { e = String(e.dropLast()) }
+        while e.hasPrefix(".") { e = String(e.dropFirst()) }
+        return e
     }
 
     // MARK: - Private network detection
@@ -212,15 +229,29 @@ public enum URLGuard {
         return nil
     }
 
+    /// The IANA special-purpose registry, not just RFC 1918. Everything outside this is
+    /// treated as public internet, so anything missing here is reachable.
     private static func privateIPv4Reason(_ octets: (Int, Int, Int, Int)) -> String? {
         let (a, b, c, d) = octets
         if a == 0 && b == 0 && c == 0 && d == 0 { return "unspecified address" }
+        if a == 0 { return "this-network IP (0.0.0.0/8)" }
         if a == 127 { return "loopback IP" }
         if a == 10 { return "private IP (10.0.0.0/8)" }
         if a == 172 && (16...31).contains(b) { return "private IP (172.16.0.0/12)" }
         if a == 192 && b == 168 { return "private IP (192.168.0.0/16)" }
         if a == 169 && b == 254 { return "link-local IP (169.254.0.0/16)" }
         if a == 100 && (64...127).contains(b) { return "carrier-grade NAT IP (100.64.0.0/10)" }
+        // 192.0.0.0/24 is IETF protocol assignments, and 192.0.0.192 is Oracle Cloud's
+        // metadata endpoint. Same class of target as 169.254.169.254, and it was
+        // reachable while that one was blocked.
+        if a == 192 && b == 0 && c == 0 { return "IETF protocol assignment (192.0.0.0/24)" }
+        if a == 192 && b == 0 && c == 2 { return "documentation range (192.0.2.0/24)" }
+        if a == 198 && (18...19).contains(b) { return "benchmark range (198.18.0.0/15)" }
+        if a == 198 && b == 51 && c == 100 { return "documentation range (198.51.100.0/24)" }
+        if a == 203 && b == 0 && c == 113 { return "documentation range (203.0.113.0/24)" }
+        if (224...239).contains(a) { return "multicast IP (224.0.0.0/4)" }
+        // Covers 255.255.255.255 broadcast as well as the reserved 240/4 block.
+        if a >= 240 { return "reserved or broadcast IP (240.0.0.0/4)" }
         return nil // public IPv4
     }
 
@@ -276,8 +307,20 @@ public enum URLGuard {
         if bytes.allSatisfy({ $0 == 0 }) { return "unspecified IPv6" }
         if bytes[0..<15].allSatisfy({ $0 == 0 }) && bytes[15] == 1 { return "loopback IPv6" }
         if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80 { return "link-local IPv6" }
+        // Deprecated site-local, fec0::/10. Deprecated is not the same as unroutable:
+        // stacks still resolve and connect to it.
+        if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0xc0 { return "site-local IPv6 (deprecated)" }
         if (bytes[0] & 0xfe) == 0xfc { return "unique-local IPv6" }
         if bytes[0] == 0xff { return "multicast IPv6" }
+
+        // 6to4, 2002::/16, tunnels to the IPv4 address sitting in bytes 2 through 5.
+        // It is the fourth member of the embedded-IPv4 family and was the one missing,
+        // so 2002:7f00:1:: reached loopback while ::ffff:127.0.0.1 was correctly denied.
+        if bytes[0] == 0x20 && bytes[1] == 0x02 {
+            let v4 = (Int(bytes[2]), Int(bytes[3]), Int(bytes[4]), Int(bytes[5]))
+            if let reason = privateIPv4Reason(v4) { return "\(reason) (embedded in 6to4)" }
+            return nil
+        }
 
         // IPv4-mapped (::ffff:a.b.c.d), IPv4-compatible (::a.b.c.d) and the NAT64
         // well-known prefix (64:ff9b::/96) all target an IPv4 host, so apply the IPv4

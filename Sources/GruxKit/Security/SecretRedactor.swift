@@ -17,33 +17,58 @@ import Foundation
 ///    useful after the fact, and a generic tag on a live payment key reads as noise.
 /// 2. **Idempotence.** `redact(redact(x)) == redact(x)`. Redacted text gets re-redacted
 ///    constantly in practice, because prompts are assembled from fragments that were
-///    each cleaned on the way in. Without this, `[REDACTED:ANTHROPIC_KEY]` is itself a
-///    long mixed-class token and the entropy pass eats its own output.
+///    each cleaned on the way in. It holds because `[`, `]` and `:` are outside every
+///    pattern's character class, so a marker is only ever seen as the short runs
+///    `REDACTED` and `HIGH_ENTROPY`, both far under the length floor. The `hasPrefix`
+///    check in `replaceHighEntropy` is defence in depth for anyone who later widens the
+///    class, not the thing currently doing the work.
 ///
 /// This is deliberately a matcher, not a parser. It cannot catch a secret that does
 /// not look like one, and it is the last line rather than the only one. Do not use it
 /// to justify feeding the agent credentials it did not need.
 public enum SecretRedactor {
 
+    /// Every prefix pattern carries this left boundary. Without it the matcher happily
+    /// starts mid-word: "task-management-system" contains "sk-management-system", which
+    /// satisfied the OpenAI pattern and turned ordinary prose into
+    /// "ta[REDACTED:OPENAI_KEY]". Excluding `-` and `_` as well as alphanumerics is the
+    /// part that matters, because the prefixes themselves contain those characters.
+    private static let L = #"(?<![A-Za-z0-9_\-])"#
+
     /// Ordered, most-specific prefixes first, JWT before generic entropy, generic last.
     private static let patterns: [(tag: String, regex: NSRegularExpression)] = {
         let raw: [(String, String)] = [
-            ("ANTHROPIC_KEY", #"sk-ant-[A-Za-z0-9_\-]{10,}"#),
+            // PEM has to consume the whole armoured block, not just the header line.
+            // Matching the header alone tagged it [REDACTED:PEM] and then handed the
+            // model every byte of the key body, which inverts the entire point of the
+            // library. Lazy to the first END so two adjacent keys stay separate.
+            ("PEM", #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"#),
+            // Truncated block: a header with no END still has to swallow the base64
+            // body lines that follow it, or a clipped key leaks everything but the tail.
+            ("PEM", #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:[ \t]*[\r\n]+[A-Za-z0-9+/=]{16,})*"#),
+            ("ANTHROPIC_KEY", L + #"sk-ant-[A-Za-z0-9_\-]{10,}"#),
             // Generic OpenAI-style secret key (sk-... and sk-proj-...). Runs after the
             // more specific sk-ant- so Anthropic keys keep their own tag. The 16-char
             // floor catches real keys, which are far longer, while leaving short "sk-"
             // prose alone.
-            ("OPENAI_KEY", #"sk-(?:proj-)?[A-Za-z0-9_\-]{16,}"#),
-            ("AWS_KEY", #"AKIA[0-9A-Z]{16}"#),
-            ("PEM", #"-----BEGIN [A-Z ]*PRIVATE KEY-----"#),
-            ("GITHUB_PAT", #"ghp_[A-Za-z0-9]{30,}"#),
-            ("GITHUB_FINE_GRAINED", #"github_pat_[A-Za-z0-9_]{20,}"#),
-            ("SLACK_TOKEN", #"xox[baprs]-[A-Za-z0-9\-]{20,}"#),
-            ("STRIPE_LIVE_SECRET", #"sk_live_[A-Za-z0-9]{20,}"#),
-            ("STRIPE_LIVE_PUBLIC", #"pk_live_[A-Za-z0-9]{20,}"#),
-            ("STRIPE_LIVE_RESTRICTED", #"rk_live_[A-Za-z0-9]{20,}"#),
-            ("ELEVENLABS_KEY", #"sk_[a-f0-9]{48,}"#),
-            ("JWT", #"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#)
+            ("OPENAI_KEY", L + #"sk-(?:proj-)?[A-Za-z0-9_\-]{16,}"#),
+            // AKIA is the long-lived access key ID, ASIA the temporary session one.
+            ("AWS_KEY", L + #"A(?:KIA|SIA)[0-9A-Z]{16}"#),
+            ("GOOGLE_API_KEY", L + #"AIza[0-9A-Za-z_\-]{35}"#),
+            ("GOOGLE_OAUTH_SECRET", L + #"GOCSPX-[A-Za-z0-9_\-]{20,}"#),
+            // ghp_ ghs_ gho_ ghu_ ghr_ all exist and all authenticate.
+            ("GITHUB_TOKEN", L + #"gh[posur]_[A-Za-z0-9]{30,}"#),
+            ("GITHUB_FINE_GRAINED", L + #"github_pat_[A-Za-z0-9_]{20,}"#),
+            ("SLACK_TOKEN", L + #"xox[baprse]-[A-Za-z0-9\-]{20,}"#),
+            ("STRIPE_WEBHOOK_SECRET", L + #"whsec_[A-Za-z0-9]{20,}"#),
+            ("STRIPE_LIVE_SECRET", L + #"sk_live_[A-Za-z0-9]{20,}"#),
+            ("STRIPE_LIVE_PUBLIC", L + #"pk_live_[A-Za-z0-9]{20,}"#),
+            ("STRIPE_LIVE_RESTRICTED", L + #"rk_live_[A-Za-z0-9]{20,}"#),
+            // Test keys are not harmless: they identify the account and leak in support
+            // threads, and people paste the wrong one constantly.
+            ("STRIPE_TEST_KEY", L + #"[sprk]k_test_[A-Za-z0-9]{20,}"#),
+            ("ELEVENLABS_KEY", L + #"sk_[a-f0-9]{48,}"#),
+            ("JWT", L + #"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#)
         ]
         return raw.compactMap { pair in
             (try? NSRegularExpression(pattern: pair.1, options: [])).map { (pair.0, $0) }
@@ -51,13 +76,15 @@ public enum SecretRedactor {
     }()
 
     /// Generic high-entropy run, executed LAST so the specific patterns get first crack.
-    /// Word-ish lookarounds and a 40-character floor, and a token is only redacted when
-    /// it spans at least 4 character classes (upper, lower, digit, symbol). That filter
-    /// is what keeps long base-ten numbers, hex digests, repeated letters and ordinary
-    /// long words out of the redactor.
+    ///
+    /// `/` is deliberately NOT in this class. It used to be, and the result was that
+    /// `/var/folders/mn/2xk8h9_d3qz7fzz.../T/build.log` matched as ONE token and the
+    /// whole path was replaced, as was a GitHub permalink including its domain. A path
+    /// separator is structure, not secret material, so excluding it splits a path into
+    /// short segments that fall under the length floor on their own.
     private static let entropyRegex: NSRegularExpression? = {
         try? NSRegularExpression(
-            pattern: #"(?<![A-Za-z0-9])[A-Za-z0-9+/=_\-]{40,}(?![A-Za-z0-9])"#,
+            pattern: #"(?<![A-Za-z0-9])[A-Za-z0-9+=_\-]{32,}(?![A-Za-z0-9])"#,
             options: []
         )
     }()
@@ -81,11 +108,42 @@ public enum SecretRedactor {
     /// Without a fence, "ignore your previous instructions" that the agent merely *read*
     /// is indistinguishable from the same sentence that you *typed*.
     ///
+    /// **The fence carries a random per-call id, and that is load-bearing.** A fixed
+    /// `</untrusted_data>` closer is forgeable by the very input it is meant to contain:
+    /// any web page that prints that literal string escapes the block and everything
+    /// after it reads as your instructions. That is a one-line bypass of the whole
+    /// defence, written by the attacker, in the exact input class this function exists
+    /// to handle. With an unguessable id in both tags, a forged closer does not match.
+    ///
+    /// Tell the model, in your system prompt, that only the closer bearing the matching
+    /// id ends the block.
+    ///
     /// Pipe ANY screen, ambient, file or network text through this before it reaches a
-    /// prompt. The fence is not a guarantee, it is a signal the model can act on, and it
-    /// is strictly better than concatenation.
+    /// prompt. The fence is still not a guarantee. It is a boundary the model can act
+    /// on, and it is not a substitute for withholding capabilities the agent did not
+    /// need in the first place.
     public static func wrapAsUntrusted(_ kind: String, _ body: String) -> String {
-        return "<untrusted_data kind=\"\(kind)\">\n\(redact(body))\n</untrusted_data>"
+        wrapAsUntrusted(kind, body, id: Self.newFenceID())
+    }
+
+    /// Deterministic variant, for tests and for callers that need to reference the same
+    /// fence id in their system prompt. Prefer the random one everywhere else.
+    public static func wrapAsUntrusted(_ kind: String, _ body: String, id: String) -> String {
+        let safeKind = kind.filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
+        let safeID = id.filter { $0.isHexDigit }
+        // Belt and braces. The id alone already makes a forged closer useless, since the
+        // attacker cannot guess it, but neutralising the literal keeps the transcript
+        // readable and removes any doubt about what closed the block.
+        let neutralised = redact(body)
+            .replacingOccurrences(of: "</untrusted_data", with: "<\u{200B}/untrusted_data")
+        return "<untrusted_data kind=\"\(safeKind)\" id=\"\(safeID)\">\n"
+            + neutralised
+            + "\n</untrusted_data id=\"\(safeID)\">"
+    }
+
+    /// 64 bits of unguessable fence id, rendered as hex.
+    public static func newFenceID() -> String {
+        String(UInt64.random(in: UInt64.min...UInt64.max), radix: 16)
     }
 
     // MARK: - Internals
@@ -109,29 +167,47 @@ public enum SecretRedactor {
         for match in matches.reversed() {
             guard let swiftRange = Range(match.range, in: result) else { continue }
             let token = String(result[swiftRange])
-            // Skip anything that is already a redaction marker. This is the line that
-            // makes redact() idempotent.
+            // Defence in depth, not the active mechanism. Idempotence currently holds
+            // because no marker contains a 32-character run from the entropy class, so
+            // this branch is unreachable today. It stays because the moment somebody
+            // widens that class, it becomes the thing standing between this function and
+            // eating its own output.
             if token.hasPrefix("[REDACTED:") { continue }
-            if charClassCount(token) >= 4 {
+            if looksLikeASecret(token) {
                 result.replaceSubrange(swiftRange, with: "[REDACTED:HIGH_ENTROPY]")
             }
         }
         return result
     }
 
-    private static func charClassCount(_ s: String) -> Int {
-        var upper = false, lower = false, digit = false, symbol = false
+    /// The false-positive budget, and the single most delicate judgement in this file.
+    ///
+    /// The old rule counted 4 character classes and treated `-` and `_` as one of them,
+    /// which got the question backwards twice over. It fired on `kebab-case-identifiers`
+    /// and file paths, which are punctuation-rich and secret-poor, while a 64-character
+    /// random alphanumeric API token, which is nothing but entropy, scored 3 and walked
+    /// straight through. Punctuation was never the signal.
+    ///
+    /// What actually distinguishes a secret from a long ordinary token is mixed case
+    /// AND digits in the same run. Prose does not do that. Identifiers do not do that.
+    /// Hex digests do not do that, since they are single-case by convention, which is
+    /// what keeps git SHAs and md5 sums intact.
+    private static func looksLikeASecret(_ s: String) -> Bool {
+        var upper = false, lower = false, digit = false, base64Padding = false
+        var runLength = 0
         for scalar in s.unicodeScalars {
-            if scalar.value >= 0x41 && scalar.value <= 0x5A { upper = true }
-            else if scalar.value >= 0x61 && scalar.value <= 0x7A { lower = true }
-            else if scalar.value >= 0x30 && scalar.value <= 0x39 { digit = true }
-            else { symbol = true }
+            switch scalar.value {
+            case 0x41...0x5A: upper = true
+            case 0x61...0x7A: lower = true
+            case 0x30...0x39: digit = true
+            case 0x2B, 0x3D: base64Padding = true   // + and =, the base64 tell
+            default: break                           // - and _ carry no signal
+            }
+            runLength += 1
         }
-        var n = 0
-        if upper { n += 1 }
-        if lower { n += 1 }
-        if digit { n += 1 }
-        if symbol { n += 1 }
-        return n
+        // A long base64 blob is worth redacting even when it happens to be single case,
+        // because + and = do not occur in identifiers or prose.
+        if base64Padding && runLength >= 40 { return true }
+        return upper && lower && digit && runLength >= 32
     }
 }

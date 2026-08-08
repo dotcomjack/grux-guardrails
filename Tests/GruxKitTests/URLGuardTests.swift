@@ -220,6 +220,75 @@ final class URLGuardTests: XCTestCase {
         XCTAssertTrue(isAllowed("http://xn--80ak6aa92e.com/"))   // punycode
     }
 
+    // MARK: - List canonicalisation
+
+    /// Regression, and the nastiest class of bug a denylist can have: it fails OPEN.
+    /// Entries used to be trimmed with `.whitespaces`, which excludes newlines, and were
+    /// never stripped of a trailing dot. So a perfectly reasonable-looking entry matched
+    /// nothing at all and the call site had no way to tell.
+    func testDenylistEntriesAreCanonicalisedLikeHosts() {
+        let spellings = ["evil.com.", " evil.com ", "evil.com\n", "EVIL.COM", ".evil.com", "\tevil.com\t"]
+        for entry in spellings {
+            let config = URLGuardConfig(denylist: [entry])
+            XCTAssertFalse(isAllowed("https://evil.com/", config: config),
+                           "denylist entry \(entry.debugDescription) failed OPEN")
+            XCTAssertFalse(isAllowed("https://sub.evil.com/", config: config),
+                           "subdomain slipped past entry \(entry.debugDescription)")
+        }
+    }
+
+    func testTrustedLANHostsAreCanonicalisedToo() {
+        for entry in ["Box.local", " box.local ", "box.local.", "BOX.LOCAL"] {
+            let config = URLGuardConfig(trustedLANHosts: [entry])
+            XCTAssertTrue(isAllowed("http://box.local/", config: config),
+                          "trusted entry \(entry.debugDescription) silently did nothing")
+        }
+    }
+
+    func testAllowlistEntriesAreCanonicalised() {
+        let config = URLGuardConfig(allowlist: ["Corp.Example.\n"])
+        XCTAssertTrue(isAllowed("https://api.corp.example/", config: config))
+    }
+
+    // MARK: - The rest of the special-purpose registry
+
+    /// Everything outside the covered ranges is treated as public internet, so anything
+    /// missing here is reachable. 192.0.0.192 is Oracle Cloud's metadata endpoint, the
+    /// same class of target as 169.254.169.254, and it was allowed while that one was
+    /// correctly denied.
+    func testSpecialPurposeIPv4RangesAreDenied() {
+        let denied = [
+            "http://192.0.0.192/",        // Oracle Cloud metadata
+            "http://192.0.2.1/",          // TEST-NET-1
+            "http://198.18.0.1/",         // benchmark
+            "http://198.51.100.1/",       // TEST-NET-2
+            "http://203.0.113.1/",        // TEST-NET-3
+            "http://224.0.0.1/",          // multicast
+            "http://239.255.255.250/",    // SSDP multicast
+            "http://240.0.0.1/",          // reserved
+            "http://255.255.255.255/",    // broadcast
+            "http://0.1.2.3/",            // this-network
+        ]
+        for u in denied {
+            XCTAssertFalse(isAllowed(u), "should be denied: \(u)")
+        }
+        // Neighbouring public addresses stay allowed, so the ranges are not overbroad.
+        for u in ["http://192.0.1.1/", "http://198.20.0.1/", "http://223.255.255.1/", "http://204.0.113.1/"] {
+            XCTAssertTrue(isAllowed(u), "should stay allowed: \(u)")
+        }
+    }
+
+    /// 6to4 is the fourth member of the embedded-IPv4 family and was the one missing, so
+    /// 2002:7f00:1:: reached loopback while ::ffff:127.0.0.1 was denied.
+    func test6to4AndSiteLocalIPv6AreDenied() {
+        XCTAssertFalse(isAllowed("http://[2002:7f00:1::]/"))        // 6to4 -> 127.0.0.1
+        XCTAssertFalse(isAllowed("http://[2002:c0a8:105::]/"))      // 6to4 -> 192.168.1.5
+        XCTAssertFalse(isAllowed("http://[2002:a9fe:a9fe::]/"))     // 6to4 -> 169.254.169.254
+        XCTAssertFalse(isAllowed("http://[fec0::1]/"))              // site-local
+        // 6to4 wrapping a public IPv4 is still fine.
+        XCTAssertTrue(isAllowed("http://[2002:0808:0808::]/"))      // 6to4 -> 8.8.8.8
+    }
+
     // MARK: - Case handling
 
     func testHostMatchingIsCaseInsensitive() {
