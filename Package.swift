@@ -1,4 +1,5 @@
 // swift-tools-version: 5.9
+// █ dcj · dotcomjack.com · MIT
 import PackageDescription
 
 let package = Package(

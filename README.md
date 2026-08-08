@@ -1,3 +1,15 @@
+<!-- dcj-tag:start -->
+```
+██████╗  ██████╗     ██╗
+██╔══██╗██╔════╝     ██║
+██║  ██║██║          ██║
+██║  ██║██║     ██   ██║
+██████╔╝╚██████╗╚█████╔╝
+╚═════╝  ╚═════╝ ╚════╝
+d o t c o m j a c k
+```
+<!-- dcj-tag:end -->
+
 # GruxKit
 
 Guardrails for desktop AI agents, in Swift. MIT licensed.

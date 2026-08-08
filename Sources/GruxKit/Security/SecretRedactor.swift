@@ -1,3 +1,4 @@
+// █ dcj · dotcomjack.com · MIT
 import Foundation
 
 /// Canonical redactor for anything untrusted that is about to enter a model prompt:
