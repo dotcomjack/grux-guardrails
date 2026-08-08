@@ -40,7 +40,7 @@ let clean = SecretRedactor.redact(ocrText)
 // "deploy with sk-ant-api03-…"  ->  "deploy with [REDACTED:ANTHROPIC_KEY]"
 ```
 
-Twelve provider-specific patterns plus a generic high-entropy pass. Two properties are
+Seventeen provider-specific patterns plus a generic high-entropy pass. Two properties are
 load-bearing and both are pinned by tests:
 
 **Most specific wins.** A Stripe live key is tagged `[REDACTED:STRIPE_LIVE_SECRET]`, not
@@ -48,34 +48,51 @@ the generic entropy tag. Precision is what makes the audit trail worth reading l
 
 **It is idempotent.** `redact(redact(x)) == redact(x)`. Prompts get assembled from
 fragments that were each cleaned on the way in, so the function runs over its own output
-constantly. Without an explicit guard, `[REDACTED:ANTHROPIC_KEY]` is itself a long mixed
-class token and the entropy pass eats its own markers.
+constantly. It holds because `[`, `]` and `:` sit outside every character class, so a
+marker is only ever seen as the short runs `REDACTED` and `HIGH_ENTROPY`, both well under
+the length floor.
 
-The generic pass requires 40+ characters spanning 4 character classes before it fires.
-That threshold exists because **a redactor that mangles ordinary text is a redactor
-people switch off**, and a switched-off redactor protects nothing. An md5 digest, a long
-URL path, and fifty consecutive digits all pass through untouched, and there are tests
-asserting exactly that.
+PEM blocks are consumed whole, header through footer, including a truncated block with no
+footer. Redacting the header alone would tag the block and then hand the model every byte
+of the key, which is the failure this library exists to prevent.
+
+The generic pass fires on a 32+ character run carrying mixed case **and** digits, or a
+40+ character run containing base64 padding. That rule exists because **a redactor that
+mangles ordinary text is a redactor people switch off**, and a switched-off redactor
+protects nothing. Mixed case with digits is what separates a random token from prose, an
+identifier, or a hex digest, and hex digests being single case by convention is exactly
+what keeps git SHAs and checksums intact. Absolute file paths, GitHub permalinks,
+kebab-case identifiers, md5 sums and fifty consecutive digits all pass through untouched,
+and there are tests asserting each one.
 
 There is also a fence for the injection half of the problem, which is a different problem
 from the secrets half:
 
 ```swift
 let block = SecretRedactor.wrapAsUntrusted("screen_ocr", pageText)
-// <untrusted_data kind="screen_ocr"> … </untrusted_data>
+// <untrusted_data kind="screen_ocr" id="9f3a2b7c1d4e8a05"> … </untrusted_data id="9f3a2b7c1d4e8a05">
 ```
 
 Text the agent *read* and text you *typed* are indistinguishable once concatenated into a
-prompt. The fence does not make injection impossible. It gives the model a boundary it
-can act on, which is strictly better than concatenation and is not a substitute for not
-handing the agent capabilities it did not need.
+prompt.
+
+**The random id in the tag is load-bearing.** A fixed `</untrusted_data>` closer is
+forgeable by the very input it is meant to contain: any web page that prints that literal
+string escapes the block, and everything after it reads as your instructions. That is a
+one-line bypass, written by the attacker, in the exact input class this function exists to
+handle. With an unguessable id in both tags a forged closer does not match. Tell the model
+in your system prompt that only the closer bearing the matching id ends the block.
+
+The fence still does not make injection impossible. It gives the model a boundary it can
+act on, and it is not a substitute for withholding capabilities the agent did not need.
 
 ### What it does not do
 
 It is a matcher, not a parser, so it cannot catch a secret that does not look like one.
-A password, a session cookie with a short opaque value, an internal hostname, or a private
-key pasted without its PEM header all pass straight through. It is the last line, not the
-only one, and it is not a reason to feed an agent credentials it did not need.
+A password, a session cookie with a short opaque value, an internal hostname, or a
+credential in a format no pattern covers all pass straight through. New providers appear
+constantly and this list will always trail them. It is the last line, not the only one,
+and it is not a reason to feed an agent credentials it did not need.
 
 ## URLGuard
 
