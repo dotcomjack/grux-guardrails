@@ -94,9 +94,14 @@ public enum SecretRedactor {
     /// rejecting any token with a segment shorter than 4 characters. A path is short
     /// segments joined by separators, and an absolute path starts with `/`, which is an
     /// empty leading segment. A base64 blob is one long run, or long runs.
+    /// `=` is only legal as TRAILING base64 padding, never inside the run. Treating it as
+    /// an ordinary token character made `Authorization=Bearer_...` a single 40+ token, so
+    /// the whole thing including the field name was replaced. This file's promise is that
+    /// the model still sees the shape of the document, and swallowing the label destroys
+    /// exactly that: the reader can no longer tell which field was redacted.
     private static let entropyRegex: NSRegularExpression? = {
         try? NSRegularExpression(
-            pattern: #"(?<![A-Za-z0-9])[A-Za-z0-9+/=_\-]{40,}(?![A-Za-z0-9])"#,
+            pattern: #"(?<![A-Za-z0-9])[A-Za-z0-9+/_\-]{40,}={0,2}(?![A-Za-z0-9])"#,
             options: []
         )
     }()

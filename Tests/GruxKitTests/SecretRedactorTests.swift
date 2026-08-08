@@ -428,3 +428,31 @@ final class ReadmeClaimsTests: XCTestCase {
                        "README claims \(claimed.map(String.init) ?? "no") patterns, code has \(count)")
     }
 }
+
+extension SecretRedactorTests {
+    /// Regression. `=` was an ordinary token character, so `Authorization=Bearer_...`
+    /// formed one 40+ run and the field NAME was swallowed with the value. The module's
+    /// stated promise is that the model still sees the shape of the document, and losing
+    /// the label is precisely that shape.
+    func testEqualsDoesNotSwallowTheFieldName() {
+        let cases = [
+            "Authorization=Bearer_abcdefghijklmnopqrstuvwxyz012345",
+            "CONTAINER_IMAGE_DIGEST=sha256_abcdefghijklmnopqrstuvwxyz",
+        ]
+        for s in cases {
+            XCTAssertEqual(SecretRedactor.redact(s), s, "swallowed a label: \(s)")
+        }
+        // A redaction inside a query string keeps the field name visible.
+        let q = SecretRedactor.redact("user=alice&session=" + String(repeating: "aB1", count: 20))
+        XCTAssertTrue(q.hasPrefix("user=alice&session="), "lost the field name: \(q)")
+        XCTAssertTrue(q.contains("[REDACTED:"))
+    }
+
+    /// Trailing base64 padding must still be consumed, or the redaction leaves a dangling
+    /// "==" that makes the marker look truncated.
+    func testTrailingBase64PaddingIsConsumed() {
+        let b64 = "K7gN+U3vJ2p/QzXm5R8wYt1LcVfHbNdEjA9sKpMoQwE="
+        let out = SecretRedactor.redact(b64)
+        XCTAssertEqual(out, "[REDACTED:HIGH_ENTROPY]", "padding left behind: \(out)")
+    }
+}
