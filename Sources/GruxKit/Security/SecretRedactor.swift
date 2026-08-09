@@ -158,16 +158,24 @@ public enum SecretRedactor {
     /// the document: 0.711s on 760KB of ordinary prose against 0.076s for this form, on
     /// text containing no secrets at all. Nine times the cost of the pass it sits next
     /// to, paid on every call, to scan text that will never match.
-    private static let assignmentRegex: NSRegularExpression? = {
-        try? NSRegularExpression(
-            pattern: #"(?i)\b((?:[A-Za-z0-9]+[_\-])*(?:secret|token|password|passwd|apikey|api[_\-]?key|auth|credential)[A-Za-z0-9]*(?:[_\-][A-Za-z0-9]+)*)"#
-                   // The optional quote BEFORE the separator is what makes JSON work:
-                   // `"api_key": "..."` closes the key before the colon.
-                   + #"(["']?\s*[=:]\s*["']?)"#
-                   + #"([A-Za-z0-9+/_\-]{16,}={0,2})"#,
-            options: []
-        )
-    }()
+    /// Words that mark a name as holding a credential. Matched as plain SUBSTRINGS, case
+    /// insensitively, with no word boundary. That is the whole point: the previous regex
+    /// required the keyword to start the name or follow a separator, so `access_token` was
+    /// caught and `accessToken`, `clientSecret`, `PGPASSWORD` and `_auth` were not.
+    private static let credentialWords = [
+        "secret", "token", "password", "passwd", "pass", "pwd",
+        "apikey", "api_key", "api-key", "auth", "credential", "private",
+        // Bare "key" is deliberately included, because SESSION_KEY and SIGNING_KEY are
+        // credentials and nothing narrower reaches them. It also matches PARTITION_KEY and
+        // PRIMARY_KEY, whose values are column names, so the value brake below carries the
+        // decision rather than this list.
+        "key",
+    ]
+
+    /// Auth schemes that sit between the separator and the value in an HTTP header. RFC
+    /// 7235 puts a scheme token there, and requiring the value to start immediately after
+    /// the separator meant every `Authorization: Bearer ...` header leaked in full.
+    private static let authSchemes = ["bearer", "basic", "digest", "token", "apikey", "key"]
 
     /// Replace every secret-shaped token in `input` with `[REDACTED:KIND]`.
     /// Safe to call repeatedly on its own output.
@@ -179,14 +187,171 @@ public enum SecretRedactor {
         // After the provider prefixes, so a recognised key keeps its own precise tag, and
         // before the entropy pass, so a labelled value is caught even when it is too
         // short or too single-case for the generic rule to see it.
-        if let assignment = assignmentRegex {
-            let range = NSRange(out.startIndex..<out.endIndex, in: out)
-            out = assignment.stringByReplacingMatches(
-                in: out, options: [], range: range,
-                withTemplate: "$1$2[REDACTED:ASSIGNED_SECRET]")
-        }
+        out = redactURLCredentials(in: out)
+        out = redactLabelledValues(in: out)
         out = replaceHighEntropy(in: out)
         return out
+    }
+
+    /// Mean length of the `/`-separated segments of a token.
+    private static func meanSegmentLength(of s: String) -> Double {
+        let parts = s.split(separator: "/", omittingEmptySubsequences: false)
+        guard !parts.isEmpty else { return 0 }
+        let total = parts.reduce(0) { $0 + $1.count }
+        return Double(total) / Double(parts.count)
+    }
+
+    // MARK: - Labelled values
+
+    /// Redact the value of anything whose NAME says it holds a credential.
+    ///
+    /// This is a scanner, not a regex, and that is a deliberate rewrite. The regex version
+    /// required three things to be true at once: the name had to clear a word boundary,
+    /// AND the value had to be drawn from a narrow character class, AND the value had to
+    /// begin immediately after the separator. Each of those three was its own leak, and
+    /// five audit rounds found them one at a time. Scanning separates finding the NAME
+    /// from taking the VALUE, so a new spelling of either cannot silently disable the
+    /// other. It is also linear by construction, which removes the backtracking that made
+    /// 8KB of ordinary CSS-class text cost forty seconds.
+    private static func redactLabelledValues(in input: String) -> String {
+        let s = Array(input)
+        let lower = Array(input.lowercased())
+        var out = ""
+        out.reserveCapacity(s.count)
+        var i = 0
+
+        while i < s.count {
+            guard let wordEnd = credentialWordEnd(lower, at: i) else {
+                out.append(s[i]); i += 1; continue
+            }
+            // The keyword is inside a name. Take the whole name token around it, then look
+            // for a separator. If either fails this is ordinary prose, so emit and move on.
+            var nameEnd = wordEnd
+            while nameEnd < s.count, isNameChar(s[nameEnd]) { nameEnd += 1 }
+
+            var j = nameEnd
+            while j < s.count, s[j] == "\"" || s[j] == "'" { j += 1 }
+            let beforeSpace = j
+            while j < s.count, s[j] == " " || s[j] == "\t" { j += 1 }
+            if j < s.count, s[j] == "=" || s[j] == ":" {
+                j += 1
+                while j < s.count, s[j] == " " || s[j] == "\t" { j += 1 }
+            } else if j > beforeSpace {
+                // Whitespace alone is a separator too. netrc writes `password hunter2`,
+                // and so does every CLI flag (`--password hunter2`). Requiring = or :
+                // meant a .netrc, which exists to hold credentials, leaked entirely.
+                // Prose survives this because the value brake rejects short words:
+                // "password reset requested" yields "reset", which is not a credential.
+            } else {
+                out.append(s[i]); i += 1; continue
+            }
+
+            // An optional auth-scheme word, then more whitespace.
+            if let afterScheme = skipAuthScheme(lower, from: j) { j = afterScheme }
+            var quote: Character? = nil
+            if j < s.count, s[j] == "\"" || s[j] == "'" { quote = s[j]; j += 1 }
+
+            // Take the value to its natural delimiter for the surrounding format.
+            let valueStart = j
+            while j < s.count, !isValueTerminator(s[j], quote: quote) { j += 1 }
+            let value = String(s[valueStart..<j])
+
+            // Never re-redact an existing marker. The provider patterns run BEFORE this
+            // scanner, so `token ghp_...` is already `token [REDACTED:GITHUB_TOKEN]` by
+            // the time we get here, and without this guard the scanner treats that marker
+            // as the value and replaces it with a less precise tag. That destroys both
+            // load-bearing properties at once: the specific tag, and idempotence.
+            guard !value.hasPrefix("[REDACTED:"), looksLikeACredentialValue(value) else {
+                out.append(s[i]); i += 1; continue
+            }
+            out.append(contentsOf: s[i..<valueStart])
+            out.append("[REDACTED:ASSIGNED_SECRET]")
+            i = j
+        }
+        return out
+    }
+
+    /// Index just past a credential word starting at `at`, or nil. Plain substring match.
+    private static func credentialWordEnd(_ lower: [Character], at i: Int) -> Int? {
+        for word in credentialWords {
+            let w = Array(word)
+            guard i + w.count <= lower.count else { continue }
+            var k = 0
+            while k < w.count, lower[i + k] == w[k] { k += 1 }
+            if k == w.count { return i + w.count }
+        }
+        return nil
+    }
+
+    private static func skipAuthScheme(_ lower: [Character], from j: Int) -> Int? {
+        for scheme in authSchemes {
+            let w = Array(scheme)
+            guard j + w.count < lower.count else { continue }
+            var k = 0
+            while k < w.count, lower[j + k] == w[k] { k += 1 }
+            guard k == w.count else { continue }
+            var after = j + w.count
+            guard after < lower.count, lower[after] == " " || lower[after] == "\t" else { continue }
+            while after < lower.count, lower[after] == " " || lower[after] == "\t" { after += 1 }
+            return after
+        }
+        return nil
+    }
+
+    private static func isNameChar(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber || c == "_" || c == "-" || c == "."
+    }
+
+    /// Where a value ends. Inside quotes only the closing quote ends it; otherwise the
+    /// delimiters of env files, YAML, JSON, query strings and shell all end it.
+    private static func isValueTerminator(_ c: Character, quote: Character?) -> Bool {
+        if let q = quote { return c == q || c == "\n" || c == "\r" }
+        return c == " " || c == "\t" || c == "\n" || c == "\r"
+            || c == "&" || c == "," || c == ";" || c == "}" || c == "]"
+            || c == "\"" || c == "'"
+    }
+
+    /// The false-positive brake, and the only thing standing between substring matching
+    /// and eating every config file an agent reads. `tokenizer=wordpiece` and
+    /// `authors=alice,bob` both contain credential words in the NAME, so the VALUE has to
+    /// carry the decision. A real credential is long and is not a plain lowercase word.
+    private static func looksLikeACredentialValue(_ v: String) -> Bool {
+        guard v.count >= 8 else { return false }
+        var hasDigit = false, hasUpper = false, hasLower = false, hasSymbol = false
+        for c in v {
+            if c.isNumber { hasDigit = true }
+            else if c.isUppercase { hasUpper = true }
+            else if c.isLowercase { hasLower = true }
+            else { hasSymbol = true }
+        }
+        // A lowercase dictionary word is not a secret, however long. A digit or mixed case
+        // is doing something a word does not.
+        if hasDigit || (hasUpper && hasLower) { return true }
+        // Punctuation alone is the weakest signal, because snake_case identifiers carry it:
+        // PARTITION_KEY=created_at is a column name, not a credential. Require real length
+        // before punctuation on its own is enough.
+        return hasSymbol && v.count >= 12
+    }
+
+    // MARK: - Credentials inside URLs
+
+    /// `postgres://user:password@host` and every scheme like it.
+    ///
+    /// URLGuard has always denied this shape unconditionally, so for five rounds the two
+    /// halves of this package disagreed about whether `user:pass@` is a credential. It is.
+    private static let urlCredentialRegex: NSRegularExpression? = {
+        try? NSRegularExpression(
+            pattern: #"([A-Za-z][A-Za-z0-9+.\-]{1,31}://[^\s/:@]{1,256}:)([^\s/@]{1,256})(@)"#,
+            options: []
+        )
+    }()
+
+    private static func redactURLCredentials(in input: String) -> String {
+        guard let regex = urlCredentialRegex else { return input }
+        let range = NSRange(input.startIndex..<input.endIndex, in: input)
+        return regex.stringByReplacingMatches(
+            in: input, options: [], range: range,
+            withTemplate: "$1[REDACTED:URL_CREDENTIAL]$3")
     }
 
     /// Redact, then fence the result so the model can tell untrusted DATA apart from
@@ -354,7 +519,14 @@ public enum SecretRedactor {
         // A real path has either several short segments or an empty leading one, because
         // an absolute path opens with a separator. A base64 blob has at most one short
         // run and never opens with one.
-        if sawSlash && (shortSegments >= 2 || leadingEmpty) { return false }
+        // Mean segment length is the third signal, and it is what separates a path from a
+        // base64 blob that happens to contain a short run. A path is many short names
+        // joined by separators, so its mean segment is small; a blob split by an incidental
+        // slash leaves long segments either side. Without this, a bare 40-character key
+        // with no label was discarded as a path about 1.7% of the time, and a bare key is
+        // the case with no other signal to fall back on.
+        if sawSlash && leadingEmpty { return false }
+        if sawSlash && shortSegments >= 2 && meanSegmentLength(of: s) < 10 { return false }
 
         return upper && lower && digit && runLength >= 32
     }
