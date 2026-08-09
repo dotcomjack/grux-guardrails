@@ -107,6 +107,17 @@ enum Corpus {
         "PATH=/usr/local/bin:/usr/bin",
         "CONTAINER_IMAGE_DIGEST=sha256_abcdefghijklmnopqrstuvwxyz",
 
+        // Names containing credential words whose VALUES are not credentials. These are
+        // the false positives that substring matching and a whitespace separator invite,
+        // so they are the brake's job.
+        "PARTITION_KEY=created_at",
+        "PRIMARY_KEY=user_id",
+        "SORT_KEY=timestamp",
+        "keyboard_layout=qwerty",
+        "password reset requested by admin",
+        "the auth flow expired",
+        "monkey_patch=enabled",
+
         // Ordinary prose and structure.
         "The meeting is at 3pm, ask sk about it.",
         "Run the task with --sk-mode enabled.",
