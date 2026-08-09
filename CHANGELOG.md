@@ -15,8 +15,12 @@ tuning one number could not solve the problem, because the number was the wrong 
 - **The path heuristic was discarding real keys.** It rejected any token with one segment
   under four characters, which base64 produces by chance. Measured over 200,000 random
   AWS secret access keys it threw away 14% of them, rising to 34% at session-token
-  length. It now requires two independent signals. Measured leak rate for that credential
-  is now 0%.
+  length. It now requires two independent signals, which takes the LABELLED form
+  (`AWS_SECRET_ACCESS_KEY=...`) to 0%. **Correction:** an earlier version of this entry
+  claimed 0% without qualification. That was wrong. A BARE 40-character key with no label
+  still leaks at about 1.5%, measured over 20,000 samples. The 0% figure came from
+  measuring the labelled form and generalising, which is the same mistake this project
+  keeps making: a number verified in one shape and asserted in another.
 - **Private keys inside JSON now lose their bodies.** Where newlines are escaped as
   `\n`, as in a GCP service account file, the line-based pattern matched only the header
   and let 4 of 25 body lines reach the model behind a `[REDACTED:PEM]` tag.
