@@ -207,6 +207,11 @@ same round.
   `testRealBase64WithPaddingIsStillCaught` used `+` and `==` with no `-` or `_` anywhere, so
   the brake was never evaluated. Five base64url fixtures were added and, planted, they fail.
 
+  **Verified independently of its own fixtures.** The reviewer generated 208,675 realistic
+  url-safe-base64-with-padding tokens and measured the leak count fall from 75 to zero, and
+  separately confirmed the original plus-addressed email is still spared. Five fixtures
+  passing says the examples were fixed; that says the class was.
+
 - **A measured number was published as though it were exact.** "12 out of 400,000" appeared
   in README.md, CHANGELOG.md and the source comment. The reviewer reproduced the stated
   methodology and got 22. A third seed gives 19. All three are honest samples; the mistake

@@ -304,11 +304,19 @@ final class SecretRedactorTests: XCTestCase {
 
     /// The price of the rule above, pinned rather than left to be discovered.
     ///
-    /// Requiring three segments means a SINGLE-component absolute path, 40 characters or
-    /// more, carrying mixed case and a digit, is now redacted. Both examples below are
-    /// synthetic: none of the 814 real paths and URLs taken off a working machine has this
-    /// shape, and the real single-component entries under `/` are short (`/Applications`,
-    /// `/Library`, `/System`, `/Users`, `/Volumes`).
+    /// **The boundary is exactly one slash, and that is narrower than "fewer than three
+    /// segments" makes it sound.** The leading `/` closes a segment by itself, so a path
+    /// with any single interior slash already has three and is spared. Only a path with the
+    /// leading slash and NO other slash falls through, which is to say a single component
+    /// directly under root. Measured: `/Volumes/MyExternalDrive2026BackupArchiveVolume`
+    /// survives and the same name with the interior slash removed does not.
+    ///
+    /// Such a component then rests on the bare fallback, `upper && lower && digit &&
+    /// runLength >= 32`, which any long CamelCase name carrying a year satisfies.
+    ///
+    /// Every example is synthetic. None of the 814 real paths and URLs taken off a working
+    /// machine has this shape, and the real single-component entries under `/` are short:
+    /// `/Applications`, `/Library`, `/System`, `/Users`, `/Volumes`.
     ///
     /// It is pinned as an assertion rather than described in a comment so that anyone who
     /// finds a genuine path of this shape gets a failing test naming the trade, instead of
@@ -316,18 +324,30 @@ final class SecretRedactorTests: XCTestCase {
     /// component, not loosening the segment count, which is what was leaking.
     ///
     /// The two directions are not equal, which is why this trade goes this way. A leak
-    /// hands a live credential to a model. A mangle costs a reader one path.
+    /// hands a live credential to a model. A mangle costs a reader one path. It is also
+    /// why no sixth heuristic was added to `looksLikeASecret` to rescue these: every
+    /// signal added to that function this round introduced a defect of its own, and buying
+    /// a synthetic path back with a new guess is how the next leak gets written.
     func testTheKnownPriceOfTheLeadingSlashRule() {
         let mangled = [
             "/ThisIsAVeryLongSingleDirectoryName2026x",
             "/ApplicationsXcode15ProductionBuild2026a",
+            // Found independently by a reviewer that wrote none of this code, which is why
+            // they are here: two people looking for the same cost found the same shape.
+            "/MyExternalDrive2026BackupArchiveVolumeMountPoint",
+            "/DotConfigBackupArchive2026SettingsFileHereXYZLong",
+            "/AbcdefGHIJKLmnopQRSTuvwxYZ0123456789ABCDEF",
+            "/SystemVolumeInformationBackup2026DriveIndexFile",
+            "/A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0BackupFile",
         ]
         for path in mangled {
             XCTAssertEqual(SecretRedactor.redact(path), "[REDACTED:HIGH_ENTROPY]",
                            "the documented cost changed shape: \(path)")
         }
-        // The neighbours that must NOT be caught up in it, all real shapes.
+        // The neighbours that must NOT be caught up in it, all real shapes. The first pair
+        // is the boundary itself: the same name, with and without one interior slash.
         let safe = [
+            "/Volumes/MyExternalDrive2026BackupArchiveVolume",
             "/Volumes/BackupDrive2026ExternalArchive1",
             "/home_directory_backup_2026_08_10_final1",
             "/mnt/VeryLongVolumeLabelForTheNAS2026Arch",

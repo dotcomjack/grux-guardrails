@@ -93,6 +93,11 @@ either, and one without a digit walked out completely in the clear. The sentence
 already written correctly when the code was not, which is the argument for checking code
 against its own documentation rather than the other way round.
 
+That fix was verified independently rather than by its own fixtures. A reviewer that wrote
+none of this code generated 208,675 realistic url-safe-base64-with-padding tokens and
+measured the leak count fall from 75 to zero, which is the class closing rather than five
+examples passing.
+
 What stays traded away: a plus-addressed local part of 40 or more characters containing no
 hyphen and no underscore is still redacted. That case annoys. The other one harms.
 
