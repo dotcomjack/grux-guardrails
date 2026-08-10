@@ -74,8 +74,16 @@ PEM blocks are consumed whole, header through footer, including a truncated bloc
 footer. Redacting the header alone would tag the block and then hand the model every byte
 of the key, which is the failure this library exists to prevent.
 
-The generic pass fires on a 40+ character run carrying mixed case **and** digits, or one
-containing base64 padding. That rule exists because **a redactor that mangles ordinary
+The generic pass considers a 40+ character run carrying mixed case **and** digits, or one
+containing base64 padding in a base64 alphabet, and then applies the path exclusions below
+before deciding. Both halves of that sentence are load-bearing. "Considers" rather than
+"fires on", because a run can clear the character test and still be spared as a path. And
+"in a base64 alphabet", because standard base64 is `A-Za-z0-9+/` while base64url is
+`A-Za-z0-9-_`, and neither contains both: a run carrying a `+` alongside a `-` or `_` is
+not base64 in either spelling. Without that qualifier a plus-addressed email address was
+destroyed the moment its local part reached 40 characters.
+
+That rule exists because **a redactor that mangles ordinary
 text is a redactor people switch off**, and a switched-off redactor protects nothing.
 Mixed case with digits is what separates a random token from prose, an identifier, or a
 hex digest, and hex digests being single case by convention is exactly what keeps git

@@ -57,6 +57,73 @@ still described the round-five single-signal rule, "a token with any segment sho
 four characters is a path", and it claimed GitHub permalinks pass through untouched "and
 there are tests asserting each one", which was false at the time it was written.
 
+### Eighth audit, part two, two live bugs behind three doc claims
+
+Eight findings from round seven were carried forward unadjudicated and described as
+"doc-accuracy and test-quality, no leaks". Adjudicating them found that description was
+wrong: two were live defects in shipped behaviour, and they had been filed as README drift
+because the README sentence was the visible symptom.
+
+- **A plus-addressed email address was destroyed.**
+  `support+order-confirmation-and-shipping-updates@motorcityorganics.com` came out as
+  `[REDACTED:HIGH_ENTROPY]@motorcityorganics.com`. All lowercase, no digits, nothing
+  secret. `+` set the base64-padding flag, and that shortcut returns true before any other
+  rule is consulted, so nothing downstream could object. The brake is that `+` is the
+  base64 tell only in a base64 alphabet: standard base64 is `A-Za-z0-9+/`, base64url is
+  `A-Za-z0-9-_`, and a run carrying a `+` alongside a `-` or `_` is neither.
+
+- **"Most specific wins" was false wherever a credential actually sits.**
+  `postgres://user:sk_live_...@db` and `curl -u alice:sk_live_...` both came out
+  `[REDACTED:URL_CREDENTIAL]` and `[REDACTED:BASIC_CREDENTIAL]`. The pattern pass ran first
+  and correctly wrote `[REDACTED:STRIPE_LIVE_SECRET]`, and then the URL and flag passes
+  matched that marker AS a value and overwrote it. Nothing leaked; the casualty was the
+  audit trail, which is the only thing the tag is for. The claim is stated as load-bearing
+  in README.md and again in the file's own doc comment. Those passes now skip a value that
+  is already a marker, and an unrecognised credential in the same position still gets the
+  generic tag, which is pinned by its own test.
+
+Five of the remaining six were tests that could not fail:
+
+- **The quadratic-regression test never reached the code it guarded.** Its repeated unit
+  was 36 characters and `entropyRegex` requires 40, so `replaceHighEntropy` returned at its
+  `guard !matches.isEmpty` line and the loop carrying the entire defect never ran. With the
+  quadratic form planted, the measured ratio was 1.126 against 1.136 for the fixed code,
+  which no bound could separate. The `max(1.0, ...)` floor was a second layer of the same
+  problem: it evaluated to about 20 seconds on that input. The unit is now 41 characters,
+  the bound is a plain 2.5x ratio, and an assertion fails if the body ever drifts back
+  below the floor. Planted, it now fails at 3.06x.
+
+- **`testMostSpecificPatternWins` used a 38-character fixture**, below the 40-character
+  entropy floor, so `XCTAssertFalse(contains("HIGH_ENTROPY"))` was true for a reason
+  unrelated to ordering. The fixture is now long enough for both passes to compete.
+
+- **The `leadingEmpty` branch had no coverage at all.** Deleting it left the whole suite
+  green, and the compiler said so: the build emitted "variable 'leadingEmpty' was written
+  to, but never read", because that line was the flag's only reader. Every fixture in the
+  test that claimed to cover it was rejected by a different signal first.
+
+- **`testBlankTrustedLANEntriesMatchNothing` never probed an empty host**, which is the
+  only thing its `!isEmpty` guard can decide. Both its probe URLs had non-empty hosts, so
+  the comparison was never what denied them. A host CAN be empty: `http://./` parses to
+  "." and the trailing-dot loop strips it to "". The guard turns out to be genuinely
+  load-bearing, so the finding was right about the test and wrong to imply the guard was
+  decoration.
+
+- **`testAllowlistMatchesSubdomains` asserted that a public hostname was allowed**, which
+  it is with the allowlist emptied. The allowlist has exactly one observable power: it is
+  consulted before `privateNetworkReason`, so it overrides a denial. The test now pins
+  that, and states the consequence plainly, that allowlisting a domain also allowlists
+  subdomains of it which spell a private address.
+
+The sixth was genuine documentation drift, the stale path heuristic already rewritten
+above.
+
+Six more plants, each confirmed red then reverted green, for nine across the round. One of
+them is the reason this section exists at all: the panel that produced these eight findings
+was told to default to refuted, and it still returned all eight as confirmed. Verifying each
+at file and line myself is what separated the two live bugs from the doc drift they were
+filed as.
+
 ### Seventh audit, URLGuard and the audit surface
 
 This one covers `URLGuard`, the fence and the test suite, none of which round six

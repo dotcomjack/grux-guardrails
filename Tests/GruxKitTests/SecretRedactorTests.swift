@@ -46,10 +46,93 @@ final class SecretRedactorTests: XCTestCase {
     /// Ordering is the point: the generic entropy pass would also match a Stripe key,
     /// so the specific pattern has to win or the audit log loses the detail that
     /// matters most.
+    /// The fixture is 48 characters after the `sk_live_` prefix, deliberately. The previous
+    /// one was `sk_live_ABCDEFGHIJ0123456789abcdefghij`, which is 38, and `entropyRegex`
+    /// requires a run of 40. So the generic pass could never have matched it whatever the
+    /// ordering was, and `XCTAssertFalse(contains("HIGH_ENTROPY"))` was true for a reason
+    /// that had nothing to do with the property being tested. Ordering can only be
+    /// demonstrated by a token both passes can actually see.
     func testMostSpecificPatternWins() {
-        let out = SecretRedactor.redact("stripe sk_live_ABCDEFGHIJ0123456789abcdefghij end")
+        let token = "sk_live_ABCDEFGHIJ0123456789abcdefghijKLMNOPQRSTUV0123456"
+        XCTAssertGreaterThanOrEqual(token.count, 40,
+                                    "the fixture must be long enough for BOTH passes to match")
+        let out = SecretRedactor.redact("stripe \(token) end")
         XCTAssertTrue(out.contains("[REDACTED:STRIPE_LIVE_SECRET]"))
         XCTAssertFalse(out.contains("[REDACTED:HIGH_ENTROPY]"))
+    }
+
+    /// "Most specific wins" is claimed unconditionally in README.md and again in this
+    /// file's own doc comment, and it was false in the two places a credential is most
+    /// likely to be sitting. `patterns` runs first and correctly produced
+    /// `[REDACTED:STRIPE_LIVE_SECRET]`, and then the URL and `curl -u` passes matched the
+    /// marker itself as a value and overwrote it with their own generic tag.
+    ///
+    /// Nothing leaked either way. The casualty was the audit trail, which is the only
+    /// reason the tag exists.
+    func testSpecificTagSurvivesInsideURLAndFlagCredentials() {
+        let cases: [(String, String)] = [
+            ("postgres://user:sk_live_ABCDEFGHIJ0123456789abc@db.acme.io:5432/app",
+             "[REDACTED:STRIPE_LIVE_SECRET]"),
+            ("curl -u alice:sk_live_ABCDEFGHIJ0123456789abc https://api.stripe.com/v1/charges",
+             "[REDACTED:STRIPE_LIVE_SECRET]"),
+            ("https://user:sk-ant-api03-ABCDEF0123456789abcdef@example.com/x",
+             "[REDACTED:ANTHROPIC_KEY]"),
+        ]
+        for (input, expectedTag) in cases {
+            let out = SecretRedactor.redact(input)
+            XCTAssertTrue(out.contains(expectedTag),
+                          "specific tag was overwritten: \(input) -> \(out)")
+            XCTAssertFalse(out.contains("[REDACTED:URL_CREDENTIAL]"),
+                           "downgraded to a generic tag: \(out)")
+            XCTAssertFalse(out.contains("[REDACTED:BASIC_CREDENTIAL]"),
+                           "downgraded to a generic tag: \(out)")
+        }
+    }
+
+    /// The other half. An UNRECOGNISED credential in the same positions must still be
+    /// redacted, with the generic tag, or the fix above would have traded a cosmetic defect
+    /// for a real leak.
+    func testUnrecognisedCredentialsStillGetTheGenericTag() {
+        XCTAssertEqual(
+            SecretRedactor.redact("postgres://user:hunter2Passw0rdLongEnough@db.acme.io:5432/app"),
+            "postgres://user:[REDACTED:URL_CREDENTIAL]@db.acme.io:5432/app")
+        XCTAssertEqual(
+            SecretRedactor.redact("curl -u alice:hunter2Passw0rdLongEnough https://api.acme.io"),
+            "curl -u alice:[REDACTED:BASIC_CREDENTIAL] https://api.acme.io")
+    }
+
+    /// A plus-addressed email address was destroyed the moment its local part reached 40
+    /// characters, because `+` set the base64-padding flag and that shortcut returns true
+    /// before any other rule is consulted. All lowercase, no digits, nothing secret about
+    /// it, and no downstream rule could object because the function had already returned.
+    ///
+    /// The brake is that `+` is the base64 tell only in a base64 alphabet. Standard base64
+    /// is `A-Za-z0-9+/` and base64url is `A-Za-z0-9-_`, so a run carrying a `+` AND a `-`
+    /// or `_` is neither.
+    func testPlusAddressedEmailsAreNotBase64() {
+        let benign = [
+            "support+order-confirmation-and-shipping-updates@motorcityorganics.com",
+            "jack+monthly-newsletter-from-motorcityorganics@dotcomjack.com",
+            "receipts+amazon_orders_and_returns_and_refunds@example.com",
+        ]
+        for text in benign {
+            XCTAssertEqual(SecretRedactor.redact(text), text, "mangled an address: \(text)")
+        }
+    }
+
+    /// Adjacent to the test above, because that brake makes the base64 shortcut narrower
+    /// and a shortcut that stops firing is a leak. Real base64 uses one alphabet or the
+    /// other, never both, so all of these must still be caught.
+    func testRealBase64WithPaddingIsStillCaught() {
+        let secrets = [
+            "dGhpcyBpcyBhIHNlY3JldCB2YWx1ZSB0aGF0IGlzIGxvbmc+PT09",
+            "aGVsbG8gd29ybGQgdGhpcyBpcyBhIHZlcnkgbG9uZyBiYXNlNjQgc3RyaW5n+abc==",
+            "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWZnaGlqa2xtbm9w",
+        ]
+        for secret in secrets {
+            XCTAssertEqual(SecretRedactor.redact(secret), "[REDACTED:HIGH_ENTROPY]",
+                           "leaked a base64 blob: \(secret)")
+        }
     }
 
     func testAnthropicKeyBeatsGenericOpenAIPattern() {
@@ -160,6 +243,21 @@ final class SecretRedactorTests: XCTestCase {
         }
     }
 
+    /// `if sawSlash && leadingEmpty { return false }` had NO coverage. Deleting it left the
+    /// whole suite green, and the compiler said so out loud: with that one line gone the
+    /// build emits "variable 'leadingEmpty' was written to, but never read", because it was
+    /// the flag's only reader. Every fixture in the test above is rejected by one of the
+    /// other two signals before `leadingEmpty` is ever consulted.
+    ///
+    /// This one is saved by `leadingEmpty` alone. The segments after the leading separator
+    /// are long, so the mean-length rule does not fire, and only one is a name, so the
+    /// round-eight rule does not fire either.
+    func testAnAbsolutePathIsSavedByItsLeadingSeparatorAlone() {
+        let path = "/Vk8mQ2xPzR7nT4wY/bG9jYWxob3N0OjgwODA/Zm9vYmFyYmF6cXV4/x1"
+        XCTAssertEqual(SecretRedactor.redact(path), path,
+                       "the leading-separator rule is the only thing protecting this")
+    }
+
     /// Round 8, and the fixtures above are exactly why this one had to be written
     /// separately. Every path there is saved by a SHAPE rule, and each was chosen, without
     /// anyone meaning to, so that a shape rule would save it. `github.com/a/b/blob/...`
@@ -265,17 +363,41 @@ final class SecretRedactorTests: XCTestCase {
     }
 
     /// Regression, a denial of service, and a nasty one because the trigger is invisible.
-    /// The old pass converted NSRange to a Swift String range per match, which is O(n)
-    /// on any string that is not all-ASCII. A single curly apostrophe, emoji or
-    /// non-breaking space anywhere in the input made the whole pass quadratic: 296KB went
-    /// from 0.030s to 1.970s. Prose contains those characters constantly.
+    /// The old pass converted NSRange to a Swift String range per match, which is O(n) on
+    /// any string that is not all-ASCII. A single curly apostrophe, emoji or non-breaking
+    /// space anywhere in the input made the whole pass quadratic. Prose contains those
+    /// characters constantly.
+    ///
+    /// This test was VACUOUS for a full round, and it failed in the most complete way a
+    /// test can: the body never reached the code under test at all. The repeated unit was
+    /// `Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2 `, which is 36 characters, and `entropyRegex`
+    /// requires a run of 40. So `replaceHighEntropy` returned at its
+    /// `guard !matches.isEmpty` line, the loop that carries the whole defect never
+    /// executed, and the second or so each call took was the OTHER passes, identical in
+    /// both builds. Measured with the quadratic form planted: entropy match count 0, ratio
+    /// 1.126 against 1.136 for the fixed code, which no bound of any value could separate.
+    ///
+    /// The `max(1.0, ...)` floor was the second layer of the same problem. On this input it
+    /// evaluated to about 20 seconds, so even a body that DID match would have passed.
+    ///
+    /// So the unit is now 40 characters, which produces one entropy match per repetition,
+    /// and the bound is a plain ratio with no floor. Measured at this exact input, five
+    /// runs per configuration: shipped code 1.23 in debug and 1.34 in release, planted
+    /// quadratic 3.01 in debug and 4.74 in release.
     func testOneNonASCIICharacterDoesNotMakeRedactionQuadratic() {
-        let body = String(repeating: "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2 ", count: 8000)
-        let ascii = Date(); _ = SecretRedactor.redact(body)
+        // 40 characters plus a space, so every repetition is one entropy match.
+        let unit = "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2Yz34 "
+        XCTAssertEqual(unit.count, 41, "the unit must clear the 40-character entropy floor")
+        let body = String(repeating: unit, count: 8000)
+        let ascii = Date(); let asciiOut = SecretRedactor.redact(body)
         let asciiTime = Date().timeIntervalSince(ascii)
+        // If this ever stops holding, the body has drifted below the floor again and the
+        // timing assertion below is measuring nothing.
+        XCTAssertTrue(asciiOut.contains("[REDACTED:HIGH_ENTROPY]"),
+                      "the body no longer reaches replaceHighEntropy, so this test is vacuous")
         let mixed = Date(); _ = SecretRedactor.redact("\u{2019}" + body)
         let mixedTime = Date().timeIntervalSince(mixed)
-        XCTAssertLessThan(mixedTime, max(1.0, asciiTime * 20),
+        XCTAssertLessThan(mixedTime, asciiTime * 2.5,
                           "one non-ASCII char cost \(mixedTime)s vs \(asciiTime)s for ASCII")
     }
 

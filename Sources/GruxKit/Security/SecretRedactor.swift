@@ -229,10 +229,8 @@ public enum SecretRedactor {
 
     private static func redactBasicAuthFlags(in input: String) -> String {
         guard let regex = basicAuthFlagRegex else { return input }
-        let range = NSRange(input.startIndex..<input.endIndex, in: input)
-        return regex.stringByReplacingMatches(
-            in: input, options: [], range: range,
-            withTemplate: "$1$2$3[REDACTED:BASIC_CREDENTIAL]")
+        return replacePreservingMarkers(in: input, regex: regex, valueGroup: 4,
+                                        replacement: "[REDACTED:BASIC_CREDENTIAL]")
     }
 
     private static let schemeLedRegex: NSRegularExpression? = {
@@ -492,10 +490,47 @@ public enum SecretRedactor {
 
     private static func redactURLCredentials(in input: String) -> String {
         guard let regex = urlCredentialRegex else { return input }
-        let range = NSRange(input.startIndex..<input.endIndex, in: input)
-        return regex.stringByReplacingMatches(
-            in: input, options: [], range: range,
-            withTemplate: "$1[REDACTED:URL_CREDENTIAL]$3")
+        return replacePreservingMarkers(in: input, regex: regex, valueGroup: 2,
+                                        replacement: "[REDACTED:URL_CREDENTIAL]")
+    }
+
+    /// Replace one capture group of every match, EXCEPT where that group already holds a
+    /// redaction marker.
+    ///
+    /// Without this, the passes that run later silently downgrade the tag the earlier ones
+    /// worked out. `patterns` runs first precisely so a recognised provider key keeps its
+    /// own precise tag, and then `postgres://user:sk_live_...@db` came out as
+    /// `[REDACTED:URL_CREDENTIAL]`, because by the time the URL pass ran, the value it was
+    /// looking at WAS `[REDACTED:STRIPE_LIVE_SECRET]` and it overwrote it. Same for
+    /// `curl -u alice:sk_live_...`.
+    ///
+    /// That made "most specific wins" false in exactly the two places a credential is most
+    /// likely to be sitting, and the claim is stated as load-bearing both in this file's
+    /// doc comment and in README.md. Nothing leaked either way, so the only casualty was
+    /// the audit trail, which is the thing the tag exists for.
+    private static func replacePreservingMarkers(
+        in input: String, regex: NSRegularExpression, valueGroup: Int, replacement: String
+    ) -> String {
+        let ns = input as NSString
+        let matches = regex.matches(
+            in: input, options: [], range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return input }
+        let out = NSMutableString(capacity: ns.length)
+        var cursor = 0
+        var replacedAny = false
+        for match in matches {
+            let valueRange = match.range(at: valueGroup)
+            guard valueRange.location != NSNotFound else { continue }
+            if ns.substring(with: valueRange).hasPrefix("[REDACTED:") { continue }
+            out.append(ns.substring(
+                with: NSRange(location: cursor, length: valueRange.location - cursor)))
+            out.append(replacement)
+            cursor = valueRange.location + valueRange.length
+            replacedAny = true
+        }
+        guard replacedAny else { return input }
+        out.append(ns.substring(from: cursor))
+        return out as String
     }
 
     /// Redact, then fence the result so the model can tell untrusted DATA apart from
@@ -666,6 +701,7 @@ public enum SecretRedactor {
 
     private static func looksLikeASecret(_ s: String) -> Bool {
         var upper = false, lower = false, digit = false, base64Padding = false
+        var mixedAlphabet = false
         var runLength = 0
         var sawSlash = false
         var segment = 0
@@ -697,6 +733,8 @@ public enum SecretRedactor {
             case 0x30...0x39: digit = true; segment += 1; segmentIsNamelike = false
             case 0x2B, 0x3D:                                      // + and =, the base64 tell
                 base64Padding = true; segment += 1; segmentIsNamelike = false
+            case 0x2D, 0x5F:                                      // - and _
+                mixedAlphabet = true; segment += 1
             case 0x2F:                                            // the path separator
                 sawSlash = true
                 if isFirstSegment && segment == 0 { leadingEmpty = true }
@@ -714,7 +752,19 @@ public enum SecretRedactor {
         // Base64 padding is decisive and is checked BEFORE the path rule. It used to run
         // after, which meant a blob carrying `+` and `==` could still be thrown away as a
         // path because of one unlucky short run between slashes.
-        if base64Padding && runLength >= 40 { return true }
+        //
+        // `mixedAlphabet` is the brake, and it is there because this shortcut returns true
+        // before ANY other rule gets a say, so anything it gets wrong is unrecoverable.
+        // A `+` is the base64 tell only in a base64 alphabet. Standard base64 is
+        // `A-Za-z0-9+/`; base64url is `A-Za-z0-9-_`. Neither contains both, so a run
+        // carrying a `+` AND a `-` or `_` is not base64 in either spelling.
+        //
+        // Without that brake, a plus-addressed email address was destroyed the moment its
+        // local part reached 40 characters:
+        // `support+order-confirmation-and-shipping-updates@motorcityorganics.com` came out
+        // as `[REDACTED:HIGH_ENTROPY]@motorcityorganics.com`. All lowercase, no digit, and
+        // no rule downstream could object because this line had already returned.
+        if base64Padding && !mixedAlphabet && runLength >= 40 { return true }
 
         // Path rejection, on TWO weak signals rather than one.
         //
