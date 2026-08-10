@@ -58,6 +58,14 @@ final class CorpusTests: XCTestCase {
             ("underscore run", { n in (0..<n).map { "a\($0)_token_b\($0)" }.joined(separator: "_") }),
             ("repeated PEM headers", { n in String(repeating: "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n", count: n) }),
             ("query string", { n in "https://x.io/?" + (0..<n).map { "k\($0)=v\($0)" }.joined(separator: "&") }),
+            // Round 6. One unbroken run of name characters that is nothing but credential
+            // words. Every start position in a run shares its end, so restarting one
+            // character along re-walked the whole remainder: 48KB of this cost eleven
+            // seconds and 80KB of the dotted form cost twenty. The shape was already
+            // covered by the first row above and survived anyway, purely because 8KB is
+            // small enough to stay under the time budget. Scale is part of the test.
+            ("unbroken keyword run", { n in String(repeating: "key", count: n * 40) }),
+            ("unbroken dotted run", { n in String(repeating: "auth.", count: n * 40) }),
         ]
         for (name, build) in shapes {
             let small = build(50)
@@ -69,6 +77,10 @@ final class CorpusTests: XCTestCase {
             // 8x input should cost well under 64x (quadratic). Anything worse is a hang.
             XCTAssertLessThan(largeTime, 5.0,
                               "\(name): 8x input took \(largeTime)s (small was \(smallTime)s)")
+            // And the ratio itself, because an absolute budget alone is what let the
+            // quadratic through: a slow-but-quadratic shape passes it until the input grows.
+            XCTAssertLessThan(largeTime / max(smallTime, 0.001), 24.0,
+                              "\(name): 8x input cost \(largeTime / smallTime)x, which is superlinear")
         }
     }
 }

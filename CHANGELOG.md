@@ -1,5 +1,59 @@
 # Changelog
 
+## Unreleased
+
+A sixth audit. Round five replaced the label regex with a scanner and closed six leak
+classes; this round measured what that cost and found the scanner had traded away
+precision and linearity without anyone checking either.
+
+**The finding that matters most is a method one.** The benign corpus was thirty
+hand-picked lines and all thirty passed. Run against this project's own 8,590 lines of
+source and documentation instead, the redactor was destroying **0.780% of them**, roughly
+one line in 128, including URLs, filenames and Swift function names. A hand-picked corpus
+tells you about the cases you thought of. It is now 0.396%, and the measurement is the
+gate rather than the sample.
+
+- **The scanner was quadratic on attacker-chosen text.** Every start position inside one
+  run of name characters shares that run's end, so restarting one character along
+  re-walked the whole remainder. 48KB of `keykeykey` took 11 seconds and 80KB of
+  `auth.auth.` took 20. Now linear: 1MB of the same input takes about 3s. **The committed
+  superlinearity test already covered this shape and passed anyway**, because 8KB stays
+  under an absolute time budget. It now tests the growth ratio as well as the clock, and
+  at a scale where the difference shows: with the fix reverted, that test reports 8x input
+  costing 65x and taking 121 seconds.
+- **A credential word anywhere inside any token made the NEXT token disappear.**
+  `curl -u bot:hunter2Passw0rd https://api.acme.io` ate the URL, and `see the auth
+  README.md` ate the filename. Whitespace-as-separator now requires the whole name to be
+  one of eleven exact credential names, and rejects values that are URLs, paths or
+  filenames. This was the single largest source of destroyed text.
+- **Four separator shapes that leaked**: `apiKey => "..."` read the value as a bare `>`,
+  `setApiKey("...")` had no separator the scanner recognised, and YAML that puts the value
+  on the next line, plainly or behind a `>-` block indicator, was missed entirely. The
+  call form requires a quote, so `decryptWithKey(masterKeyMaterial)` is left alone.
+- **Session identifiers are credentials.** `Set-Cookie: session=`, `JSESSIONID=`, `Cookie:`
+  and `csrf=` carry no credential word in the name and went out in full. A session id is
+  what a stolen cookie replays.
+- **`Bearer <token>` with no header name in front of it**, which is how `curl -v` and most
+  request logs print it. Lowercase hex is the usual shape and the entropy pass cannot see
+  it, because that rule requires mixed case. Also `curl -u user:password`, which is the
+  same credential as `https://user:pass@host` wearing a flag instead of a scheme.
+- **Supabase `sbp_` tokens** added to the provider patterns, which is what the README
+  pattern-count test immediately caught as drift. That test earned its place.
+- **The punctuation-only value brake moved from 12 characters to 20.** It was eating
+  `"key": "projects_json"` out of every blueprint and `key.anthropic` out of every config
+  enum. Measured, not guessed: 0.547% of lines destroyed to 0.396%, leak corpus unmoved.
+
+**Known leaks, stated rather than fixed.** Four classes still survive and each was a
+decision: `<password>value</password>` and `<input name="password" value="...">` need
+markup awareness, and treating `>` as a separator would redact the value of every `<key>`
+in every plist. `mysql -phunter2` glues the value to a one-letter flag with nothing to
+distinguish it from `-project`. `signature=` was declined because a webhook signature is a
+MAC over one payload rather than a reusable credential, and adding the word redacts
+`signature = inspect.signature(fn)` in ordinary Python.
+
+**Unchanged and still true:** a bare 40-character credential with no label and no provider
+prefix leaks at about 1.2%, measured over 20,000 samples on every run.
+
 ## 0.4.0
 
 **Use this one.** Every earlier tag leaks credentials, see below.

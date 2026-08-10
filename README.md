@@ -58,7 +58,7 @@ let clean = SecretRedactor.redact(ocrText)
 // "deploy with sk-ant-api03-…"  ->  "deploy with [REDACTED:ANTHROPIC_KEY]"
 ```
 
-Twenty-three patterns plus a generic high-entropy pass. Two properties are
+Twenty-four patterns plus a generic high-entropy pass. Two properties are
 load-bearing and both are pinned by tests:
 
 **Most specific wins.** A Stripe live key is tagged `[REDACTED:STRIPE_LIVE_SECRET]`, not
