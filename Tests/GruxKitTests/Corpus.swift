@@ -198,5 +198,24 @@ enum Corpus {
         "the passenger Manifest2024 boarded early",
         "authorial Voice2026 is the whole point",
         "a keystone Species4471 went extinct",
+
+        // Round 8. Paths and URLs that carry a DOT before the interesting part. The dot is
+        // the whole problem: it is not in the token class, so the entropy match starts
+        // after it, which discards the leading separator `leadingEmpty` needs and re-bases
+        // the segment statistics on the remainder. Every one of these was destroyed before
+        // the name signal landed, and none of them is saved by either older path rule.
+        //
+        // Measured on 814 real paths and URLs taken off this machine: 357 mangled, 43.9%.
+        // The permalink is the one that made it visible, and it is worth noting WHY it
+        // survived seven rounds of review. The fixture in testPathsStillSurvive uses
+        // `github.com/a/b/blob/...`, and single-letter owner and repo names are what drag
+        // the mean segment length under 10. Real names are longer, so the real URL failed
+        // while the test that claimed to cover it passed.
+        "https://github.com/dotcomjack/grux-kit/blob/78790dd41a807c18621e06ef82d6ec45048cef1c/README.md",
+        "https://github.com/anthropics/claude-code/blob/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b/CHANGELOG.md",
+        "/Users/dcj/Code/proj/.build/arm64-apple-macosx/debug/ModuleCache/Foundation-RFLD5H6WW7NI.swiftmodule",
+        "~/Library/Application Support/Grux/reports/mentions-2026-08-09.md",
+        "https://storage.googleapis.com/MyBucket/Uploads/2026/08/09/ReportFinal.pdf",
+        "s3://my-production-bucket/Exports/Daily/2026-08-09/UserActivitySnapshot.parquet",
     ]
 }

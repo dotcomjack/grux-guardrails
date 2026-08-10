@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+### Eighth audit, the path heuristic
+
+Round seven closed with one confirmed and unfixed defect: a GitHub permalink came out as
+`https://github.[REDACTED:HIGH_ENTROPY].md`. Fixing it properly meant measuring it first,
+and the measurement said the defect was roughly two orders of magnitude larger than the
+bug report. **Across 814 real paths and URLs taken off a working machine, 357 were
+destroyed, 43.9%.**
+
+The permalink was not a special case, it was the visible one. The common cause is a `.`
+anywhere earlier in the string. `.` is outside the token alphabet, so the entropy match
+begins after it, and that single fact defeats both existing path signals at once: the
+leading separator that `leadingEmpty` reads is gone, and the segment statistics the
+mean-length rule reads are re-based on whatever follows the dot. Any Swift build directory
+did it. `/Users/x/proj/.build/arm64-apple-macosx/debug/ModuleCache/Foundation-RFLD5H6WW7NI.swiftmodule`
+matched from `build` onward and went out as a single redaction.
+
+**Why it survived seven rounds is worth more than the fix.** There was a test called
+`testPathsStillSurviveWithSlashInTheClass`, it asserted on a GitHub permalink, and it
+passed. Its fixture was `github.com/a/b/blob/<sha>/File.swift`. A single-letter owner and
+a single-letter repository are exactly what drag the mean segment length under 10.
+Substitute real names, which are longer, and the same URL is destroyed. The fixture had
+been fitted to the implementation rather than to reality, and so the test agreed with the
+code about something they were both wrong about.
+
+- **A third path signal, based on content rather than shape.** A path segment is a NAME:
+  four characters or more, letters plus at most a hyphen or an underscore, no digits, and
+  at least one vowel. Three such names forming a majority of at least four segments means
+  the token is a path. The vowel test is not decoration. Runs like `mtgk`, `DTZfp` and
+  `CRKFLDvGh` clear letters-only by accident, and dropping the vowel requirement makes
+  this rule cost 31 spared secrets per 400,000 instead of 12.
+
+- **The floor of four segments is set by the AWS secret access key.** Its two slashes leave
+  three segments, so it can never reach the new rule at all. That is the single most
+  valuable credential the generic pass is responsible for, and it stays caught.
+
+**Measured on both sides, causally.** 100,000 random base64 strings at each of 40, 64, 128
+and 200 characters, generated from a fixed seed and run through the redactor with and
+without the rule, so the difference is the exact set of secrets newly spared rather than a
+sampling estimate. That distinction mattered: a first pass at N=20,000 with an unseeded
+generator appeared to show a regression at 128 characters that a seeded rerun showed was
+noise. **Cost: 12 out of 400,000, every one carrying three or more slashes. Benefit: real
+path mangling fell from 357 of 814 to 2, and the project's own corpus from 41 of 9,323 to
+40.** No secret that was caught before is missed now.
+
+Three plants confirmed red is reachable: deleting the rule fails the path test, widening it
+fails the AWS key test, and neutering the vowel check alone fails three fixtures, so the
+vowel requirement is covered rather than merely asserted. The must-stay-redacted cases sit
+in the same file as the must-stay-allowed ones, deliberately, so the trade cannot drift in
+one direction unnoticed.
+
+README.md's description of the path heuristic was stale in two ways and is rewritten. It
+still described the round-five single-signal rule, "a token with any segment shorter than
+four characters is a path", and it claimed GitHub permalinks pass through untouched "and
+there are tests asserting each one", which was false at the time it was written.
+
 ### Seventh audit, URLGuard and the audit surface
 
 This one covers `URLGuard`, the fence and the test suite, none of which round six
