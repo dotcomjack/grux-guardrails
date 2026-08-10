@@ -148,9 +148,33 @@ final class URLGuardTests: XCTestCase {
         XCTAssertFalse(isAllowed("https://user:secret@example.com/", config: config))
     }
 
-    func testAllowlistMatchesSubdomains() {
+    /// The first assertion here is the original one, and on its own it proved nothing:
+    /// `api.corp.example` is an ordinary public hostname that `evaluate` allows anyway, so
+    /// it passes with the allowlist emptied. It is kept because it documents the intended
+    /// shape, and the two below it are what actually exercise the allowlist.
+    ///
+    /// The allowlist has exactly one observable power: it is consulted BEFORE
+    /// `privateNetworkReason`, so it overrides a denial. That is deliberate, it is the
+    /// operator's explicit "I mean it" knob, and it is also the only way to tell from the
+    /// outside whether the list is being read at all. Measured: without the allowlist,
+    /// `10-0-0-1.corp.example` is denied "private IP (10.0.0.0/8) (embedded in hostname)".
+    ///
+    /// The teeth in that override are worth stating plainly. Allowlisting a domain
+    /// allowlists every subdomain of it, including ones that spell a private address, so
+    /// a domain with wildcard DNS hands back the SSRF surface the guard exists to remove.
+    /// That is the operator's call to make, and this test pins it so nobody discovers it by
+    /// accident.
+    func testAllowlistMatchesSubdomainsAndOverridesPrivateDenial() {
         let config = URLGuardConfig(allowlist: ["corp.example"])
         XCTAssertTrue(isAllowed("https://api.corp.example/", config: config))
+
+        XCTAssertFalse(isAllowed("http://10-0-0-1.corp.example/"),
+                       "denied by default, or the assertion below proves nothing")
+        XCTAssertTrue(isAllowed("http://10-0-0-1.corp.example/", config: config),
+                      "the allowlist did not override the embedded-private-IP denial")
+
+        XCTAssertFalse(isAllowed("http://127.0.0.1.corp.example/"))
+        XCTAssertTrue(isAllowed("http://127.0.0.1.corp.example/", config: config))
     }
 
     // MARK: - IPv6 smuggling and non-canonical IPv4 spellings
@@ -279,6 +303,17 @@ final class URLGuardTests: XCTestCase {
             let config = URLGuardConfig(trustedLANHosts: [junk])
             XCTAssertFalse(isAllowed("http://127.0.0.1/", config: config))
             XCTAssertFalse(isAllowed("http://router/", config: config))
+            // The case the loop above never reached, and the only one the `!isEmpty` guard
+            // can actually decide. Both probes above have non-empty hosts, so the guard's
+            // comparison was never the thing denying them: `"" == "127.0.0.1"` is false
+            // with or without the guard, which is why deleting `!e.isEmpty &&` left this
+            // test green. A host CAN be empty, because `http://./` parses to "." and the
+            // trailing-dot loop strips it to "". A blank entry then compares equal to it
+            // and returns `.allowed`.
+            XCTAssertFalse(isAllowed("http://./", config: config),
+                           "a blank entry matched an empty host, junk was \(junk.debugDescription)")
+            XCTAssertFalse(isAllowed("http://.../", config: config),
+                           "a blank entry matched an empty host, junk was \(junk.debugDescription)")
         }
     }
 
