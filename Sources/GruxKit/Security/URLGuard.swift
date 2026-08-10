@@ -577,6 +577,135 @@ public enum URLGuard {
             return nil // embedded public IPv4
         }
 
+        if let reason = ipv6RegistryReason(bytes) { return reason }
+
         return nil // public IPv6
+    }
+
+    /// The rest of the IANA IPv6 Special-Purpose Address Registry.
+    ///
+    /// The IPv4 table has been registry-complete for several rounds and this one was not:
+    /// 8 of the 25 rows were classified and 17 were allowed. That asymmetry was never a
+    /// decision, it was an absence, and absence is exactly what an audit is supposed to
+    /// turn into a decision. Every row below was driven through the real `evaluate` before
+    /// and after, so "was allowed" is measured rather than assumed.
+    ///
+    /// Three of the seventeen were genuine holes rather than tidy-ups, and they share a
+    /// shape: RFC 7723, RFC 8155 and RFC 9665 assign three anycast addresses at
+    /// `2001:1::1`, `::2` and `::3`. Anycast means packets are absorbed by the nearest
+    /// responder, which for all three is infrastructure on the local network. They read as
+    /// ordinary global unicast, they were allowed, and they are a direct path to a device
+    /// the caller was never supposed to reach.
+    ///
+    /// **The `2001::/23` trap is the reason this is a row-by-row table and not a prefix.**
+    /// The obvious implementation is to deny the whole IETF Protocol Assignments block,
+    /// which covers everything from `2001::` to `2001:1ff::` and would close the three
+    /// anycast holes, Teredo, ORCHIDv2 and DETs in one line. It would also deny
+    /// `2001:3::/32`, which is AMT, and `2001:4:112::/48`, which is AS112-v6. Both of
+    /// those are globally reachable services carrying real traffic. Denying them would be
+    /// exactly the mistake the round-seven NAT64 fix made in the other direction, so the
+    /// carve-outs are checked FIRST and return nil explicitly rather than being left to
+    /// fall out of the ordering.
+    private static func ipv6RegistryReason(_ b: [UInt8]) -> String? {
+        func prefix16(_ a: UInt8, _ c: UInt8) -> Bool { b[0] == a && b[1] == c }
+
+        // Globally reachable, carrying real traffic, MUST stay allowed. Checked before
+        // anything below so no later rule can swallow them.
+        // 2001:3::/32 AMT, RFC 7450.
+        if prefix16(0x20, 0x01) && b[2] == 0x00 && b[3] == 0x03 { return nil }
+        // 2001:4:112::/48 AS112-v6, RFC 7535.
+        if prefix16(0x20, 0x01) && b[2] == 0x00 && b[3] == 0x04
+            && b[4] == 0x01 && b[5] == 0x12 { return nil }
+        // 2620:4f:8000::/48 Direct Delegation AS112 Service, RFC 7534.
+        if prefix16(0x26, 0x20) && b[2] == 0x00 && b[3] == 0x4f
+            && b[4] == 0x80 && b[5] == 0x00 { return nil }
+
+        // Teredo, 2001::/32, RFC 4380. The last registry prefix with embedded-IPv4
+        // semantics that was not being decoded. A Teredo address carries the tunnel
+        // SERVER's IPv4 in bytes 4 through 7 in the clear, and the CLIENT's IPv4 in bytes
+        // 12 through 15 obfuscated by a bitwise NOT. Both are real destinations, so both
+        // are judged by the IPv4 policy, same as 6to4 and NAT64 above.
+        if prefix16(0x20, 0x01) && b[2] == 0x00 && b[3] == 0x00 {
+            let server = (Int(b[4]), Int(b[5]), Int(b[6]), Int(b[7]))
+            if let reason = privateIPv4Reason(server) {
+                return "\(reason) (Teredo server, embedded in 2001::/32)"
+            }
+            let client = (Int(~b[12]), Int(~b[13]), Int(~b[14]), Int(~b[15]))
+            if let reason = privateIPv4Reason(client) {
+                return "\(reason) (Teredo client, embedded in 2001::/32)"
+            }
+            return "Teredo tunnel IPv6 (2001::/32)"
+        }
+
+        // The three anycast addresses. Each is absorbed by the nearest responder, which is
+        // local infrastructure, so each is a route to the LAN wearing a global address.
+        if prefix16(0x20, 0x01) && b[2] == 0x00 && b[3] == 0x01
+            && b[4..<15].allSatisfy({ $0 == 0 }) {
+            switch b[15] {
+            case 1: return "PCP anycast IPv6 (2001:1::1), reaches the local NAT or firewall"
+            case 2: return "TURN anycast IPv6 (2001:1::2), reaches an operator relay"
+            case 3: return "DNS-SD SRP anycast IPv6 (2001:1::3), reaches the local-link registrar"
+            default: break
+            }
+        }
+
+        // 100::/64 discard-only, RFC 6666. 100:0:0:1::/64 dummy prefix, RFC 9780, which
+        // the registry marks Destination=False, meaning it is a placeholder and never a
+        // destination at all. Neither can carry a useful response, so a request to either
+        // is a mistake or a probe.
+        if prefix16(0x01, 0x00) && b[2..<8].allSatisfy({ $0 == 0 }) {
+            return "discard-only IPv6 (100::/64)"
+        }
+        if prefix16(0x01, 0x00) && b[2] == 0 && b[3] == 0 && b[4] == 0 && b[5] == 0
+            && b[6] == 0 && b[7] == 0x01 {
+            return "dummy IPv6 prefix (100:0:0:1::/64), never a destination"
+        }
+
+        // ORCHIDv2 2001:20::/28 (RFC 7343) and DETs 2001:30::/28 (RFC 9374). Both are
+        // cryptographic identifiers that merely look like addresses. The registry calls
+        // ORCHIDv2 globally reachable, which is about the identifier namespace and not
+        // about anything answering, so denying costs nothing real.
+        if prefix16(0x20, 0x01) && b[2] == 0x00 && (b[3] & 0xf0) == 0x20 {
+            return "ORCHIDv2 IPv6 identifier (2001:20::/28), not a routable host"
+        }
+        if prefix16(0x20, 0x01) && b[2] == 0x00 && (b[3] & 0xf0) == 0x30 {
+            return "DET IPv6 identifier (2001:30::/28), not a routable host"
+        }
+        // Deprecated ORCHID, 2001:10::/28. Deprecated is not unroutable, same reasoning as
+        // site-local above.
+        if prefix16(0x20, 0x01) && b[2] == 0x00 && (b[3] & 0xf0) == 0x10 {
+            return "deprecated ORCHID IPv6 (2001:10::/28)"
+        }
+
+        // Benchmarking 2001:2::/48, RFC 5180. Documentation 2001:db8::/32 (RFC 3849) and
+        // 3fff::/20 (RFC 9637). None should ever be dialled by an agent, and a request to
+        // one is a sign the caller is following an address out of a document.
+        if prefix16(0x20, 0x01) && b[2] == 0x00 && b[3] == 0x02
+            && b[4] == 0x00 && b[5] == 0x00 {
+            return "benchmarking IPv6 (2001:2::/48)"
+        }
+        if prefix16(0x20, 0x01) && b[2] == 0x0d && b[3] == 0xb8 {
+            return "documentation IPv6 (2001:db8::/32)"
+        }
+        if b[0] == 0x3f && b[1] == 0xff && (b[2] & 0xf0) == 0x00 {
+            return "documentation IPv6 (3fff::/20)"
+        }
+
+        // SRv6 SIDs, 5f00::/16, RFC 9602. The registry marks it not globally reachable.
+        // These are routing instructions scoped to one SR domain, and a SID that leaks out
+        // of its domain is a way to steer a packet inside somebody's fabric.
+        if prefix16(0x5f, 0x00) {
+            return "SRv6 SID (5f00::/16), an IPv6 routing instruction scoped to one domain"
+        }
+
+        // 2001::/23 IETF Protocol Assignments, the catch-all UNDER the specific rows
+        // above, so the AMT and AS112-v6 carve-outs have already returned. This is the
+        // exact IPv6 counterpart of IPv4 192.0.0.0/24, which the IPv4 table denies, so
+        // leaving it open was an inconsistency rather than a considered position.
+        if prefix16(0x20, 0x01) && (b[2] & 0xfe) == 0x00 {
+            return "IETF protocol assignment (2001::/23)"
+        }
+
+        return nil
     }
 }

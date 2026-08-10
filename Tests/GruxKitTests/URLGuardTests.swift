@@ -177,6 +177,81 @@ final class URLGuardTests: XCTestCase {
         XCTAssertTrue(isAllowed("http://127.0.0.1.corp.example/", config: config))
     }
 
+    /// The IANA IPv6 Special-Purpose Address Registry, driven row by row.
+    ///
+    /// The IPv4 table has been registry-complete for several rounds and this one was not.
+    /// Measured before the fix: 8 of the 25 rows were classified and 17 were allowed. That
+    /// was never a decision, it was an absence.
+    ///
+    /// Three were genuine holes rather than tidy-ups, and they share a shape. RFC 7723,
+    /// RFC 8155 and RFC 9665 put three anycast addresses at `2001:1::1`, `::2` and `::3`.
+    /// Anycast means the nearest responder absorbs the packet, and for all three that
+    /// responder is infrastructure on the local network. They read as ordinary global
+    /// unicast and they were allowed.
+    func testIANASpecialPurposeIPv6RegistryRowsAreDenied() {
+        let denied = [
+            // The three anycast addresses, the real holes.
+            "http://[2001:1::1]/", "http://[2001:1::2]/", "http://[2001:1::3]/",
+            // Teredo, the last registry prefix with embedded-IPv4 semantics.
+            "http://[2001::1]/", "http://[2001:0:0:1::1]/",
+            "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/",
+            // Discard-only and the dummy prefix, which the registry marks as never a
+            // destination at all.
+            "http://[100::1]/", "http://[100:0:0:1::1]/",
+            // Cryptographic identifiers that merely look like addresses.
+            "http://[2001:20::1]/", "http://[2001:2f::1]/", "http://[2001:30::1]/",
+            "http://[2001:10::1]/",
+            // Routing instructions scoped to one SR domain.
+            "http://[5f00::1]/", "http://[5f00:ffff::1]/",
+            // Documentation and benchmarking, which an agent only ever reaches by
+            // following an address out of a document.
+            "http://[2001:db8::1]/", "http://[3fff::1]/", "http://[3fff:0fff::1]/",
+            "http://[2001:2::1]/",
+            // The catch-all, which sits UNDER the carve-outs below.
+            "http://[2001:5::1]/", "http://[2001:1ff::1]/",
+        ]
+        for url in denied {
+            XCTAssertFalse(isAllowed(url), "reachable IPv6 special-purpose address: \(url)")
+            // Round seven's lesson, applied before it could repeat. The IPv4 table grew
+            // once and the tag map did not, so the newest denials reported as generic
+            // URL_DENIED and an alert keyed on PRIVATE_NETWORK stopped seeing them. Adding
+            // twenty rows without pinning the tag is exactly how that happens again.
+            XCTAssertEqual(URLGuard.evaluate(url).tag, "PRIVATE_NETWORK",
+                           "denial tag drifted for \(url)")
+        }
+    }
+
+    /// The other half, and it caught a real over-denial in the first draft of the rule
+    /// above. `2001::/23` is the obvious implementation: one prefix closes the three
+    /// anycast holes, Teredo, ORCHIDv2 and DETs together. It also swallows `2001:3::/32`,
+    /// which is AMT, and `2001:4:112::/48`, which is AS112-v6, both globally reachable
+    /// services carrying real traffic.
+    ///
+    /// `3fff::/20` caught the same class of mistake a second time. Written as
+    /// "b[0] == 0x3f and the high nibble of b[1] is 0xf" it spans `3ff0::` to `3fff::` and
+    /// denied `3ffe::`, which is ordinary public space. A /20 fixes the first 20 bits,
+    /// which is b[0], b[1] and the HIGH NIBBLE OF b[2], so the block really runs
+    /// `3fff:0000::` to `3fff:0fff::` and `3fff:ffff::` is public.
+    func testGloballyReachableIPv6NeighboursOfThoseRangesStayAllowed() {
+        let allowed = [
+            "http://[2001:3::1]/",           // AMT, RFC 7450, inside 2001::/23
+            "http://[2001:4:112::1]/",       // AS112-v6, RFC 7535, inside 2001::/23
+            "http://[2620:4f:8000::1]/",     // Direct Delegation AS112, RFC 7534
+            "http://[2620:4f:9000::1]/",     // just outside that /48
+            "http://[3ffe::1]/",             // one group below the documentation block
+            "http://[3fff:1000::1]/",        // just above 3fff::/20
+            "http://[3fff:ffff::1]/",        // far above it, still public
+            "http://[4000::1]/",
+            "http://[2606:4700:4700::1111]/",
+            "http://[2001:4860:4860::8888]/",
+            "http://[2a00:1450:4001:80f::200e]/",
+            "http://[2002:808:808::1]/",     // 6to4 wrapping a public IPv4
+        ]
+        for url in allowed {
+            XCTAssertTrue(isAllowed(url), "over-denied a public address: \(url)")
+        }
+    }
+
     // MARK: - IPv6 smuggling and non-canonical IPv4 spellings
 
     func testIPv4MappedIPv6CannotReachPrivateTargets() {

@@ -124,6 +124,61 @@ was told to default to refuted, and it still returned all eight as confirmed. Ve
 at file and line myself is what separated the two live bugs from the doc drift they were
 filed as.
 
+### Eighth audit, part three, the IPv6 registry was 8 rows of 25
+
+The IPv4 special-purpose table has been registry-complete for several rounds. The IPv6 one
+classified 8 of the 25 IANA rows and allowed the other 17. That was never a decision, it
+was an absence, and an audit is supposed to turn absences into decisions. Every row was
+driven through the real `evaluate` before and after, so "was allowed" is measured.
+
+**Three of the seventeen were genuine holes and they share a shape.** RFC 7723, RFC 8155
+and RFC 9665 assign anycast addresses at `2001:1::1`, `2001:1::2` and `2001:1::3`. Anycast
+means the nearest responder absorbs the packet, and for all three that responder is
+infrastructure on the local network: the PCP-capable NAT or firewall, an operator TURN
+relay, the local-link DNS-SD registrar. They read as ordinary global unicast, they were
+allowed, and they are a direct path to a device the caller was never meant to reach.
+
+**Teredo was the last prefix with embedded-IPv4 semantics still undecoded.** `2001::/32`
+carries the tunnel server's IPv4 in bytes 4 through 7 in the clear and the client's IPv4 in
+the trailing four bytes obfuscated by a bitwise NOT. 6to4 and both NAT64 prefixes were
+already decoded; this one was not, so it is now judged by the same IPv4 policy.
+
+The remaining rows are discard-only and dummy prefixes, ORCHID, ORCHIDv2 and DET
+cryptographic identifiers, SRv6 SIDs, benchmarking and the two documentation blocks. None
+is a live hole, all are free to deny, and each is now a decision with a reason string
+rather than a gap.
+
+**The prefix trap, which is why this is a row-by-row table.** The obvious implementation is
+to deny `2001::/23`, the whole IETF Protocol Assignments block, which closes the three
+anycast holes plus Teredo, ORCHIDv2 and DETs in one line. It also denies `2001:3::/32`,
+which is AMT, and `2001:4:112::/48`, which is AS112-v6. Both are globally reachable
+services carrying real traffic. The carve-outs are checked first and return explicitly.
+
+`3fff::/20` was the same mistake caught a second time, and caught by measurement rather
+than by review. Written as "b[0] is 0x3f and the high nibble of b[1] is 0xf" it spans
+`3ff0::` through `3fff::` and denied `3ffe::`, which is public. A /20 fixes the first 20
+bits, meaning b[0], b[1] and the HIGH NIBBLE OF b[2], so the block is `3fff:0000::` to
+`3fff:0fff::`. The must-stay-allowed list found it within a minute of the rule being
+written, which is the second time in two rounds that keeping both directions in one file
+has caught an over-denial before it shipped.
+
+Three of the `/28` masks had the same byte-order error in the opposite direction and never
+matched their own rows at all. `2001:20::` puts `0x00` in b[2] and `0x20` in b[3], not the
+reverse. They were still denied, by the `2001::/23` catch-all, with a misleading reason,
+which is the kind of defect that only shows up if you read the reason string and not just
+the boolean.
+
+**Round seven's lesson, applied before it could repeat.** That round found that the IPv4
+table had grown while the tag map had not, so the newest denials reported as generic
+`URL_DENIED` and an alert keyed on `PRIVATE_NETWORK` silently stopped seeing them. Adding
+twenty rows is exactly how that happens again, and eight of the new reason strings did in
+fact carry none of the needles the tag map scans for. Every new row now asserts its tag as
+well as its verdict.
+
+Three more plants: deleting the table fails 20 assertions, the naive `2001::/23` blanket
+fails on AMT and AS112-v6, and the wrong `/20` mask fails on `3ffe::`. Twelve across the
+round.
+
 ### Seventh audit, URLGuard and the audit surface
 
 This one covers `URLGuard`, the fence and the test suite, none of which round six
