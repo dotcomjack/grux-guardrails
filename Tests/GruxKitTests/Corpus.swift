@@ -73,6 +73,26 @@ enum Corpus {
         Case(label: "provider/anthropic", text: "key sk-ant-api03-ABCDEF0123456789abcdef here", secret: "sk-ant-api03-ABCDEF0123456789abcdef"),
         Case(label: "provider/hf", text: "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", secret: "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"),
         Case(label: "provider/stripe", text: "sk_live_ABCDEFGHIJ0123456789abc", secret: "sk_live_ABCDEFGHIJ0123456789abc"),
+        Case(label: "provider/supabase", text: "sbp_0123456789abcdef0123456789abcdef01234567", secret: "sbp_0123456789abcdef0123456789abcdef01234567"),
+
+        // Round 6. Names carrying no credential word at all: a session identifier is what
+        // a stolen cookie replays, so it is a credential even though nothing in it says so.
+        Case(label: "cookie/set-cookie", text: "Set-Cookie: session=3f8a9c2b1d4e5f6a7b8c9d0e1f2a3b4c", secret: "3f8a9c2b1d4e5f6a7b8c9d0e1f2a3b4c"),
+        Case(label: "cookie/header", text: "Cookie: sid=abc123def456ghi789jkl012", secret: "abc123def456ghi789jkl012"),
+        Case(label: "cookie/jsessionid", text: "JSESSIONID=A1B2C3D4E5F6A7B8C9D0E1F2", secret: "A1B2C3D4E5F6A7B8C9D0E1F2"),
+        Case(label: "csrf", text: "csrf=9f8e7d6c5b4a39281706f5e4d3c2b1a0", secret: "9f8e7d6c5b4a39281706f5e4d3c2b1a0"),
+
+        // Separators the scanner could not previously reach.
+        Case(label: "sep/rocket", text: "apiKey => abcdefghijklmnopqrstuvwxyz012345", secret: "abcdefghijklmnopqrstuvwxyz012345"),
+        Case(label: "sep/call", text: "setApiKey(\"abcdefghijklmnopqrstuvwxyz012345\")", secret: "abcdefghijklmnopqrstuvwxyz012345"),
+        Case(label: "yaml/next-line", text: "password:\n  abcdefghijklmnopqrstuvwxyz012345\n", secret: "abcdefghijklmnopqrstuvwxyz012345"),
+        Case(label: "yaml/block-scalar", text: "  clientSecret: >-\n    abcdefghijklmnopqrstuvwxyz012345\n", secret: "abcdefghijklmnopqrstuvwxyz012345"),
+
+        // A scheme with no header name in front of it, which is how request logs print it.
+        // Lowercase hex, so the entropy pass cannot see it: that rule needs mixed case.
+        Case(label: "scheme/bare-bearer", text: "Bearer 8f14e45fceea167a5a36dedd4bea2543", secret: "8f14e45fceea167a5a36dedd4bea2543"),
+        Case(label: "flag/curl-u", text: "curl -u deploybot:hunter2Passw0rd https://api.acme.io", secret: "hunter2Passw0rd"),
+        Case(label: "flag/long-password", text: "deploy --password s3cretPassw0rdForProd --verbose", secret: "s3cretPassw0rdForProd"),
     ]
 
     // MARK: - Must never be modified
@@ -123,5 +143,31 @@ enum Corpus {
         "Run the task with --sk-mode enabled.",
         "task-management-system",
         "12345678901234567890123456789012345678901234567890",
+
+        // Round 6. The whitespace separator used to make the token AFTER any token
+        // containing a credential word disappear, which destroyed URLs, filenames and
+        // paths in ordinary sentences. Measured against this project's own 8,590 lines of
+        // source and docs, that and the punctuation-only value brake were together
+        // destroying 0.780% of all lines. It is 0.396% now. These are the shapes that
+        // regression would come back through.
+        "reset your password https://example.com/reset",
+        "see the auth README.md for setup",
+        "auth failures are logged to /var/log/auth.log",
+        "private notes live in ~/Documents/Notes/2026-08-09.md",
+        "token counts are per-request, see docs/tokenizer.md",
+        // Code, which an agent reads more of than it reads prose. The call-shaped
+        // separator added in round 6 has to leave all of these alone.
+        "func authenticate(user: String) async throws -> Session",
+        "decryptWithKey(masterKeyMaterial)",
+        "public private(set) var isReady = false",
+        "case keyAnthropic = \"key.anthropic\"",
+        "\"key\": \"projects_json\",",
+        // Scheme words in prose. The bare `Bearer <token>` rule must not reach these.
+        "Basic understanding of the auth flow is assumed",
+        "bearer bonds were the collateral",
+        "the session lasted forty minutes",
+        // A uid:gid pair is not a credential, which is why the -u rule needs six
+        // characters on the password half.
+        "docker run -u 1000:1000 alpine",
     ]
 }

@@ -99,6 +99,7 @@ public enum SecretRedactor {
             ("NPM_TOKEN", L + #"npm_[A-Za-z0-9]{36}"#),
             ("DIGITALOCEAN_TOKEN", L + #"dop_v1_[a-f0-9]{64}"#),
             ("SENDGRID_KEY", L + #"SG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"#),
+            ("SUPABASE_TOKEN", L + #"sbp_[a-f0-9]{20,}"#),
             ("JWT", L + #"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#)
         ]
         return raw.compactMap { pair in
@@ -165,6 +166,10 @@ public enum SecretRedactor {
     private static let credentialWords = [
         "secret", "token", "password", "passwd", "pass", "pwd",
         "apikey", "api_key", "api-key", "auth", "credential", "private",
+        // A session identifier IS a credential: it is what a stolen cookie replays.
+        // `session` also reaches JSESSIONID and PHPSESSID, and `cookie` takes the whole
+        // header value, which is the shape these actually arrive in.
+        "session", "cookie", "csrf",
         // Bare "key" is deliberately included, because SESSION_KEY and SIGNING_KEY are
         // credentials and nothing narrower reaches them. It also matches PARTITION_KEY and
         // PRIMARY_KEY, whose values are column names, so the value brake below carries the
@@ -188,9 +193,47 @@ public enum SecretRedactor {
         // before the entropy pass, so a labelled value is caught even when it is too
         // short or too single-case for the generic rule to see it.
         out = redactURLCredentials(in: out)
+        out = redactBasicAuthFlags(in: out)
         out = redactLabelledValues(in: out)
+        // After the labelled pass, deliberately. A header that carries its own name keeps
+        // the more precise ASSIGNED_SECRET tag; this only picks up the naked case, a line
+        // that opens with the scheme and nothing else, which is how `curl -v` and most
+        // request logs print it. Lowercase hex is the common shape there and the entropy
+        // pass cannot see it, because that rule needs mixed case.
+        out = redactSchemeLedTokens(in: out)
         out = replaceHighEntropy(in: out)
         return out
+    }
+
+    /// `curl -u user:password`, which is the same credential as `https://user:pass@host`
+    /// wearing a flag instead of a scheme. Six characters minimum on the password half so
+    /// that `docker run -u 1000:1000` stays a uid:gid pair and not a redaction.
+    private static let basicAuthFlagRegex: NSRegularExpression? = {
+        try? NSRegularExpression(
+            pattern: #"(^|\s)(--user|-u)(\s+[^\s:]{1,64}:)([^\s]{6,})"#,
+            options: [])
+    }()
+
+    private static func redactBasicAuthFlags(in input: String) -> String {
+        guard let regex = basicAuthFlagRegex else { return input }
+        let range = NSRange(input.startIndex..<input.endIndex, in: input)
+        return regex.stringByReplacingMatches(
+            in: input, options: [], range: range,
+            withTemplate: "$1$2$3[REDACTED:BASIC_CREDENTIAL]")
+    }
+
+    private static let schemeLedRegex: NSRegularExpression? = {
+        try? NSRegularExpression(
+            pattern: #"(?i)\b(bearer|basic|digest)(\s+)([A-Za-z0-9+/=_.\-]{20,})"#,
+            options: [])
+    }()
+
+    private static func redactSchemeLedTokens(in input: String) -> String {
+        guard let regex = schemeLedRegex else { return input }
+        let range = NSRange(input.startIndex..<input.endIndex, in: input)
+        return regex.stringByReplacingMatches(
+            in: input, options: [], range: range,
+            withTemplate: "$1$2[REDACTED:AUTH_SCHEME_TOKEN]")
     }
 
     /// Mean length of the `/`-separated segments of a token.
@@ -229,22 +272,58 @@ public enum SecretRedactor {
             var nameEnd = wordEnd
             while nameEnd < s.count, isNameChar(s[nameEnd]) { nameEnd += 1 }
 
+            // Every start position inside one name run shares this run's nameEnd, and
+            // therefore its separator and its value, so a failure here fails identically
+            // for all of them. Skipping the whole run is what keeps this linear. Advancing
+            // one character instead made 48KB of `keykeykey` cost eleven seconds and 80KB
+            // of `auth.auth.` cost twenty, on text an attacker chooses. The committed
+            // superlinearity test does exercise this shape and missed it purely because
+            // 8KB is small enough to stay under the threshold.
+            func skipRun() {
+                out.append(contentsOf: s[i..<nameEnd])
+                i = nameEnd
+            }
+
+            // The name token as written, including anything before the keyword, because
+            // `hunter2Passw0rd` and `password` are the same keyword in very different
+            // company and only the whole token can tell them apart.
+            var tokenStart = i
+            while tokenStart > 0, isNameChar(s[tokenStart - 1]) { tokenStart -= 1 }
+            let nameToken = String(s[tokenStart..<nameEnd])
+
             var j = nameEnd
             while j < s.count, s[j] == "\"" || s[j] == "'" { j += 1 }
             let beforeSpace = j
             while j < s.count, s[j] == " " || s[j] == "\t" { j += 1 }
+            var separatorWasWhitespaceOnly = false
             if j < s.count, s[j] == "=" || s[j] == ":" {
                 j += 1
+                // Ruby and JavaScript write `apiKey => "..."`, and the arrow head is not
+                // whitespace, so without this the value was read as a bare `>`.
+                if j < s.count, s[j] == ">" { j += 1 }
                 while j < s.count, s[j] == " " || s[j] == "\t" { j += 1 }
+                j = skipToBlockScalarValue(s, from: j)
+            } else if j < s.count, s[j] == "(" {
+                // A call, `setApiKey("...")`. The quote is required: without it every
+                // `decryptWithKey(masterKeyMaterial)` in ordinary code becomes a redaction.
+                var k = j + 1
+                while k < s.count, s[k] == " " || s[k] == "\t" { k += 1 }
+                guard k < s.count, s[k] == "\"" || s[k] == "'" else { skipRun(); continue }
+                j = k
             } else if j > beforeSpace {
                 // Whitespace alone is a separator too. netrc writes `password hunter2`,
-                // and so does every CLI flag (`--password hunter2`). Requiring = or :
-                // meant a .netrc, which exists to hold credentials, leaked entirely.
-                // Prose survives this because the value brake rejects short words:
-                // "password reset requested" yields "reset", which is not a credential.
+                // and so does every CLI flag (`--password hunter2`). It is also the
+                // weakest signal in the scanner and it was the single largest source of
+                // destroyed text, because a keyword anywhere inside any token made the
+                // NEXT token disappear: `curl -u bot:hunter2Passw0rd https://api.acme.io`
+                // ate the URL, and `see the auth README.md` ate the filename. So it now
+                // carries two brakes the other separators do not need.
+                separatorWasWhitespaceOnly = true
             } else {
-                out.append(s[i]); i += 1; continue
+                skipRun(); continue
             }
+
+            if separatorWasWhitespaceOnly, !isWhitespaceSeparable(nameToken) { skipRun(); continue }
 
             // An optional auth-scheme word, then more whitespace.
             if let afterScheme = skipAuthScheme(lower, from: j) { j = afterScheme }
@@ -262,13 +341,61 @@ public enum SecretRedactor {
             // as the value and replaces it with a less precise tag. That destroys both
             // load-bearing properties at once: the specific tag, and idempotence.
             guard !value.hasPrefix("[REDACTED:"), looksLikeACredentialValue(value) else {
-                out.append(s[i]); i += 1; continue
+                skipRun(); continue
             }
+            if separatorWasWhitespaceOnly, looksLikeALocator(value) { skipRun(); continue }
             out.append(contentsOf: s[i..<valueStart])
             out.append("[REDACTED:ASSIGNED_SECRET]")
             i = j
         }
         return out
+    }
+
+    /// Names that may be followed by nothing but whitespace and still mean "the next
+    /// token is a credential". Deliberately much narrower than `credentialWords`, and
+    /// deliberately an EXACT match on the whole name rather than a substring: `key`,
+    /// `auth` and `private` are all common enough in prose that whitespace-separating on
+    /// them destroys ordinary text, while `password X` is a real file format.
+    private static let whitespaceSeparableNames: Set<String> = [
+        "password", "passwd", "pwd", "pass", "token", "secret",
+        "apikey", "api_key", "api-key", "credential", "credentials",
+    ]
+
+    private static func isWhitespaceSeparable(_ nameToken: String) -> Bool {
+        var t = Substring(nameToken.lowercased())
+        while t.first == "-" { t = t.dropFirst() }   // `--password`
+        return whitespaceSeparableNames.contains(String(t))
+    }
+
+    /// YAML puts the value on the next line, either plainly or behind a block scalar
+    /// indicator: `password:` then an indented line, or `clientSecret: >-` then one. A
+    /// Kubernetes manifest is exactly this shape and it leaked whole.
+    ///
+    /// Exactly ONE line break is crossed, never a blank line. That is what stops it from
+    /// walking out of a sentence and into the next paragraph: markdown's `set your
+    /// password:` followed by a blank line and a heading stays untouched, because the
+    /// second break is not consumed and an empty value fails the brake.
+    private static func skipToBlockScalarValue(_ s: [Character], from j: Int) -> Int {
+        var k = j
+        if k < s.count, s[k] == "|" || s[k] == ">" {
+            k += 1
+            while k < s.count, s[k] == "-" || s[k] == "+" || s[k].isNumber { k += 1 }
+            while k < s.count, s[k] == " " || s[k] == "\t" { k += 1 }
+        }
+        guard k < s.count, s[k] == "\n" || s[k] == "\r" else { return j }
+        if s[k] == "\r", k + 1 < s.count, s[k + 1] == "\n" { k += 1 }
+        k += 1
+        while k < s.count, s[k] == " " || s[k] == "\t" { k += 1 }
+        return k
+    }
+
+    /// A URL, a path or a filename. Credentials are none of these, and all three sit next
+    /// to credential words constantly in prose and in shell transcripts.
+    private static func looksLikeALocator(_ v: String) -> Bool {
+        if v.contains("://") || v.contains("/") || v.hasPrefix("~") || v.hasPrefix(".") { return true }
+        guard let dot = v.lastIndex(of: "."), dot != v.startIndex else { return false }
+        let ext = v[v.index(after: dot)...]
+        return (1...4).contains(ext.count) && ext.allSatisfy { $0.isLetter }
     }
 
     /// Index just past a credential word starting at `at`, or nil. Plain substring match.
@@ -327,10 +454,14 @@ public enum SecretRedactor {
         // A lowercase dictionary word is not a secret, however long. A digit or mixed case
         // is doing something a word does not.
         if hasDigit || (hasUpper && hasLower) { return true }
-        // Punctuation alone is the weakest signal, because snake_case identifiers carry it:
-        // PARTITION_KEY=created_at is a column name, not a credential. Require real length
-        // before punctuation on its own is enough.
-        return hasSymbol && v.count >= 12
+        // Punctuation alone is the weakest signal, because snake_case and dotted
+        // identifiers carry it and credentials almost never rely on it: every entry in the
+        // leak corpus qualifies on a digit or on mixed case instead. At a 12-character
+        // threshold this single line produced most of the surviving false positives,
+        // eating `"key": "projects_json"` out of every blueprint and `key.anthropic` out
+        // of every config enum. Twenty is measured, not guessed: it takes the project's
+        // own 8,590 lines from 0.547% destroyed to 0.396% with the leak corpus unmoved.
+        return hasSymbol && v.count >= 20
     }
 
     // MARK: - Credentials inside URLs

@@ -423,7 +423,7 @@ final class ReadmeClaimsTests: XCTestCase {
         let count = table.ranges(of: try! Regex(#"\("[A-Z_0-9]+","#)).count
 
         let words = ["Twelve": 12, "Thirteen": 13, "Fourteen": 14, "Fifteen": 15,
-                     "Sixteen": 16, "Seventeen": 17, "Eighteen": 18, "Nineteen": 19, "Twenty": 20, "Twenty-one": 21, "Twenty-two": 22, "Twenty-three": 23]
+                     "Sixteen": 16, "Seventeen": 17, "Eighteen": 18, "Nineteen": 19, "Twenty": 20, "Twenty-one": 21, "Twenty-two": 22, "Twenty-three": 23, "Twenty-four": 24, "Twenty-five": 25]
         let claimed = words.first { text.contains("\($0.key) patterns") }?.value
         XCTAssertEqual(claimed, count,
                        "README claims \(claimed.map(String.init) ?? "no") patterns, code has \(count)")
