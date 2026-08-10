@@ -142,6 +142,13 @@ than one component takes the 40-character rate from 1.295% to 0.875%, measured o
 inputs, and leaves the path corpus at 2 of 814 and the project corpus at 40 of 9,323
 exactly where they were.
 
+The price is pinned as an assertion rather than left to be discovered: a SINGLE-component
+absolute path of 40 characters or more carrying mixed case and a digit is now redacted.
+No path in the 814 has that shape, and the real single-component entries under `/` are
+short. If you hit a genuine one you get a failing test naming the trade rather than a
+silent mangle, and the fix then is a word-shape test on the component, not loosening the
+segment count, which is the thing that was leaking.
+
 Absolute paths, GitHub permalinks, DerivedData directories, ModuleCache
 filenames, kebab-case identifiers, md5 sums and fifty consecutive digits all pass through
 untouched, and there are tests asserting each one, with the must-stay-redacted cases sitting
