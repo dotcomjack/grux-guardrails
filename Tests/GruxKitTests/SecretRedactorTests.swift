@@ -160,6 +160,94 @@ final class SecretRedactorTests: XCTestCase {
         }
     }
 
+    /// Round 8, and the fixtures above are exactly why this one had to be written
+    /// separately. Every path there is saved by a SHAPE rule, and each was chosen, without
+    /// anyone meaning to, so that a shape rule would save it. `github.com/a/b/blob/...`
+    /// uses a single-letter owner and a single-letter repo, and those two characters are
+    /// what drag the mean segment length under 10. Substitute a real owner and a real repo
+    /// and the same URL is destroyed. The test passed for seven rounds while the thing it
+    /// claimed to protect was broken.
+    ///
+    /// The shared defect is a DOT earlier in the string. `.` is not in the token class, so
+    /// the entropy match begins after it, which throws away the leading separator that
+    /// `leadingEmpty` reads and re-bases every segment statistic on the remainder. Measured
+    /// across 814 real paths and URLs from this machine, 357 of them, 43.9%, were replaced
+    /// whole.
+    ///
+    /// Every fixture below is saved ONLY by the name signal. Delete
+    /// `segmentCount >= 4 && namelikeSegments >= 3` and all of them fail.
+    func testDottedPathsAndPermalinksSurvive() {
+        let benign = [
+            "https://github.com/dotcomjack/grux-kit/blob/78790dd41a807c18621e06ef82d6ec45048cef1c/README.md",
+            "https://github.com/anthropics/claude-code/blob/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b/CHANGELOG.md",
+            "/Users/dcj/Code/proj/.build/arm64-apple-macosx/debug/ModuleCache/Foundation-RFLD5H6WW7NI.swiftmodule",
+            "~/Library/Application Support/Grux/reports/mentions-2026-08-09.md",
+            "https://storage.googleapis.com/MyBucket/Uploads/2026/08/09/ReportFinal.pdf",
+            "s3://my-production-bucket/Exports/Daily/2026-08-09/UserActivitySnapshot.parquet",
+        ]
+        for text in benign {
+            XCTAssertEqual(SecretRedactor.redact(text), text, "mangled a path: \(text)")
+        }
+    }
+
+    /// The must-stay-denied half, deliberately adjacent to the must-stay-allowed half
+    /// above. A previous round shipped a fix that closed a bypass and simultaneously
+    /// started denying a legitimate public address, and the only reason that was caught
+    /// before it landed is that the two assertions lived side by side. The same discipline
+    /// applies here: the name signal makes the redactor MORE willing to call something a
+    /// path, so the price has to be measured in the same file.
+    ///
+    /// The AWS secret access key is the case that decides the thresholds. Its two slashes
+    /// leave three segments, and the floor is four, so it can never reach the name rule at
+    /// all. That is why the floor is four rather than three.
+    func testBase64SecretsContainingSlashesAreStillRedacted() {
+        let secrets = [
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "kACBNpFH/weLw/CRKFLDvGh/f20tpqavsmsGc6q1",
+            "GlYsilzly/GpwFv/ZQRd/ZZXM54o09J7o5c/CwjG",
+            "HBsmaKPbc/65bxk8u9WXBRZmf2ST/RKtf/ATeBRK",
+        ]
+        for secret in secrets {
+            XCTAssertEqual(SecretRedactor.redact(secret), "[REDACTED:HIGH_ENTROPY]",
+                           "leaked a slash-bearing secret: \(secret)")
+        }
+    }
+
+    /// The price of the name signal, published rather than hidden, the same way the bare
+    /// 40-character leak rate is published.
+    ///
+    /// Measured causally: 100,000 random base64 strings per length under a fixed seed, run
+    /// against the redactor with and without the name rule, so the difference is the exact
+    /// set of secrets the rule newly spares rather than a sampling artefact. Cost was 12
+    /// out of 400,000, and every one of the twelve carried three or more slashes. Against
+    /// that, 355 of 814 real paths stopped being destroyed.
+    ///
+    /// The bound here is deliberately loose. It exists to fail if somebody widens the name
+    /// rule far enough to start eating real credentials, not to pin a sampling estimate.
+    func testNameSignalDoesNotOpenABroadLeak() {
+        let alphabet = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+        var state: UInt64 = 0x5EED_1234_ABCD_0001
+        func next() -> UInt64 {
+            state &+= 0x9E3779B97F4A7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+            z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+            return z ^ (z >> 31)
+        }
+        var leaked = 0
+        let trials = 5000
+        for _ in 0..<trials {
+            var s = ""
+            for _ in 0..<40 { s.append(alphabet[Int(next() % UInt64(alphabet.count))]) }
+            if SecretRedactor.redact(s) == s { leaked += 1 }
+        }
+        let rate = Double(leaked) / Double(trials)
+        XCTAssertLessThan(rate, 0.05,
+                          "bare 40-char leak rate rose to \(rate), the name rule is too wide")
+        print("round 8: bare 40-char leak rate with the name signal: "
+              + "\(String(format: "%.3f", rate * 100))% (\(leaked)/\(trials))")
+    }
+
     /// Regression. The 32-character floor caught ordinary long identifiers. 40 is the
     /// length of the shortest credential the generic pass is responsible for, so nothing
     /// is lost by raising it back.

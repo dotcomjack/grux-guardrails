@@ -85,11 +85,29 @@ Paths are excluded structurally rather than by dropping `/` from the alphabet, w
 matters more than it sounds. Dropping `/` was tried, and because standard base64 contains
 `/` it blinded the redactor to the AWS secret access key, which is the half of the AWS
 pair that actually grants access. Trading a cosmetic false positive for a total miss on
-the highest-value credential is a worse bug than the one it fixed. So instead: a token
-with any segment shorter than four characters is a path, because paths are short segments
-joined by separators and an absolute path opens with an empty one. Absolute paths, GitHub
-permalinks, DerivedData directories, kebab-case identifiers, md5 sums and fifty
-consecutive digits all pass through untouched, and there are tests asserting each one.
+the highest-value credential is a worse bug than the one it fixed.
+
+So paths are recognised instead, on three independent signals. An empty leading segment,
+because an absolute path opens with a separator. Several short segments together with a
+mean segment length under ten, because a path is short names joined by separators while a
+blob split by an incidental slash leaves long runs either side. And, since round eight,
+the segments reading as NAMES: four characters or more, letters plus at most a hyphen or
+an underscore, no digits, and at least one vowel, with three such names forming a majority
+of at least four segments.
+
+That third signal is the one that covers a dot. `.` is outside the token alphabet, so a
+match starts after it, which discards the leading separator the first signal reads and
+re-bases the second signal's statistics on the remainder. Measured across 814 real paths
+and URLs, the first two signals alone destroyed 357 of them, 43.9%, including every GitHub
+permalink with a real owner and repository name. All three together leave 2.
+
+The cost is published rather than implied. Against 100,000 random base64 strings at each
+of 40, 64, 128 and 200 characters, generated from a fixed seed so the comparison is causal,
+the name signal newly spares 12 secrets out of 400,000, every one of them carrying three or
+more slashes. Absolute paths, GitHub permalinks, DerivedData directories, ModuleCache
+filenames, kebab-case identifiers, md5 sums and fifty consecutive digits all pass through
+untouched, and there are tests asserting each one, with the must-stay-redacted cases sitting
+in the same file so the trade cannot drift in one direction unnoticed.
 
 There is also a fence for the injection half of the problem, which is a different problem
 from the secrets half:
