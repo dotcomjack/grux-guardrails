@@ -121,15 +121,36 @@ final class SecretRedactorTests: XCTestCase {
     }
 
     /// Adjacent to the test above, because that brake makes the base64 shortcut narrower
-    /// and a shortcut that stops firing is a leak. Real base64 uses one alphabet or the
-    /// other, never both, so all of these must still be caught.
+    /// and a shortcut that stops firing is a leak.
+    ///
+    /// The first version of the brake tested `+` OR `=` against `-` or `_`, and the
+    /// original version of THIS test could not catch what that broke, because every
+    /// fixture in it used `+` and `==` with no `-` or `_` anywhere, so the brake was never
+    /// even evaluated. The base64url block below is the case that was missing, and it is
+    /// the one that leaked.
+    ///
+    /// `=` is padding and belongs to BOTH alphabets, so it says nothing about which is in
+    /// use. Only `+` is exclusive to standard base64, and only `-` and `_` are exclusive to
+    /// base64url. The brake is the two together and nothing else.
     func testRealBase64WithPaddingIsStillCaught() {
-        let secrets = [
+        let standard = [
             "dGhpcyBpcyBhIHNlY3JldCB2YWx1ZSB0aGF0IGlzIGxvbmc+PT09",
             "aGVsbG8gd29ybGQgdGhpcyBpcyBhIHZlcnkgbG9uZyBiYXNlNjQgc3RyaW5n+abc==",
             "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWZnaGlqa2xtbm9w",
         ]
-        for secret in secrets {
+        // Raw `base64.urlsafe_b64encode()` output with the padding left on, which is the
+        // ordinary shape of a password-reset token, an email-verification token or a signed
+        // cookie. Every one of these carries `-` or `_` AND `==`, carries no `/` so no path
+        // rule can rescue it, and carries no digit so the final mixed-case test cannot
+        // either. They went from redacted to fully in the clear.
+        let urlSafe = [
+            "aojyTcDoAfFSVWztzGhCANprePvlznHDQqs-oTX-PQ==",
+            "uOHEIMrnsHIXCySquUcknKVDqPSPJYG_muMLLeXuOg==",
+            "iAMYHzVavojuIWUbuvQumbRtvvEgpjiHY-XSFXqTXw==",
+            "laEmLVvHAaSoQhrKcIKXuVwyGQGIufTyfn-QKXqmcA==",
+            "X_sHJyTeuNZvUgNPiFztUOsWOCxAxgNOhNkKtwdx-Q==",
+        ]
+        for secret in standard + urlSafe {
             XCTAssertEqual(SecretRedactor.redact(secret), "[REDACTED:HIGH_ENTROPY]",
                            "leaked a base64 blob: \(secret)")
         }
@@ -256,6 +277,29 @@ final class SecretRedactorTests: XCTestCase {
         let path = "/Vk8mQ2xPzR7nT4wY/bG9jYWxob3N0OjgwODA/Zm9vYmFyYmF6cXV4/x1"
         XCTAssertEqual(SecretRedactor.redact(path), path,
                        "the leading-separator rule is the only thing protecting this")
+    }
+
+    /// The leading separator on its own was the single largest term in this file's
+    /// published leak rate, and nobody had noticed because the number was being read as a
+    /// general weakness of the entropy rule rather than as one specific hole.
+    ///
+    /// `leadingEmpty` fired on ANY token beginning with `/`. A random base64 secret begins
+    /// with `/` about one time in 64, which is 1.56%, against a reported bare-token leak
+    /// rate of roughly 1.3%. Measured on identical inputs under one seed, requiring a real
+    /// path to have more than one component took the 40-character rate from 1.295% to
+    /// 0.875%, a third of it, while leaving the path corpus at 2 of 814 and the project
+    /// corpus at 40 of 9,323 untouched.
+    ///
+    /// The pair below is the whole argument: the same forty characters, differing only in
+    /// a leading slash, used to get opposite verdicts.
+    func testALeadingSlashDoesNotBuyASecretAFreePass() {
+        let bare = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY12"
+        let slashed = "/JalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY12"
+        XCTAssertEqual(bare.count, 40)
+        XCTAssertEqual(slashed.count, 40)
+        XCTAssertEqual(SecretRedactor.redact(bare), "[REDACTED:HIGH_ENTROPY]")
+        XCTAssertEqual(SecretRedactor.redact(slashed), "[REDACTED:HIGH_ENTROPY]",
+                       "a leading slash spared a secret the same token without it loses")
     }
 
     /// Round 8, and the fixtures above are exactly why this one had to be written
