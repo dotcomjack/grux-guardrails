@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+### Seventh audit, URLGuard and the audit surface
+
+This one covers `URLGuard`, the fence and the test suite, none of which round six
+touched: it audited the redactor diff and nothing else.
+
+**No SSRF bypass was found.** Thirty URL spellings were probed against `evaluate`,
+including backslash-before-userinfo, circled digits, the ideographic full stop, a
+percent-encoded IPv6 zone id, ports, uppercase, bare `0`, hex-form IPv4-mapped IPv6 and
+Alibaba's CGNAT metadata address. All thirty were denied. The two limitations a reader
+might assume are covered, redirects and DNS rebinding, are already documented prominently
+in both README.md and SECURITY.md, so that concern is refuted rather than filed.
+
+What was wrong was the part that tells you an attack happened.
+
+- **`illegal character in host` was tagged `URL_DENIED`.** That is the null-byte smuggling
+  denial, `http://127.0.0.1%00.example.com/`, the only signal this guard produces that
+  implies deliberate intent rather than a typo. It sat in the same audit bucket as
+  "empty URL" and "missing host", while README.md tells you to alert on the tag. It now
+  has its own tag, `HOST_SMUGGLING`.
+
+  This is the second time the tag map has silently fallen behind. The first was when the
+  IPv4 table grew; the fix then was to add needles to a hand-maintained list, which is a
+  fix that expires. **A test now pins the whole reason-to-tag table**, and a second test
+  fails the build if the code can emit a tag the README does not document. The README's
+  tag list used to end in an ellipsis, which is precisely how a tag nobody alerts on goes
+  unnoticed, so it is now an exhaustive table.
+
+  One existing test had pinned the defect, asserting `URL_DENIED` with a comment reasoning
+  that the denial is structural rather than a private-network hit. The reasoning was right
+  and the conclusion was still wrong.
+
+- **A denylist entry written any of four ordinary ways blocked nothing at all.**
+  `https://evil.com`, `evil.com:443`, `evil.com/path` and `*.evil.com` all silently
+  matched no host while looking completely correct in a config file. A denylist fails OPEN
+  when it fails to match, which the code's own comment says, and case, whitespace, dots
+  and punycode had all been handled for exactly that reason. Schemes, ports, paths and the
+  wildcard spelling every other tool accepts had not. `canonicalEntry` now strips all four.
+
+  The port stripper deliberately refuses to fire when the entry holds more than one colon,
+  because a bare IPv6 entry has many and truncating at the last one would silently turn it
+  into a different, possibly public, address. There is a test for that specific mistake.
+
+### Sixth audit, the redactor scanner
+
 A sixth audit. Round five replaced the label regex with a scanner and closed six leak
 classes; this round measured what that cost and found the scanner had traded away
 precision and linearity without anyone checking either.

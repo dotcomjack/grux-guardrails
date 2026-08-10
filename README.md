@@ -139,10 +139,24 @@ from a web page, an email, or its own hallucination.
 ```swift
 let decision = URLGuard.evaluate(url, config: config)
 guard decision.isAllowed else {
-    log("blocked", decision.tag)   // PRIVATE_NETWORK, CREDENTIAL_URL, BAD_SCHEME, …
+    log("blocked", decision.tag)
     return
 }
 ```
+
+`tag` is the complete set below, and it is complete on purpose: this list used to end in
+an ellipsis, and a denial reason quietly landing outside the tags anyone was alerting on
+is a defect that has now happened twice. A test fails the build if the code can emit a tag
+this table does not name.
+
+| Tag | Means |
+|---|---|
+| `PRIVATE_NETWORK` | Loopback, RFC 1918, link-local, CGNAT, metadata hostnames, `.local`, single-label names, and every IPv6 equivalent. |
+| `HOST_SMUGGLING` | An illegal character in the decoded host, for example `127.0.0.1%00.example.com`. Somebody is trying to get a loopback target past the parser. **Alert on this one loudest**, it is the only tag that implies intent. |
+| `CREDENTIAL_URL` | `user:pass@host`. Denied with no override. |
+| `USER_DENYLIST` | Your own denylist matched. |
+| `BAD_SCHEME` | Not `http` or `https`. |
+| `URL_DENIED` | Empty, unparseable, or no host. Ordinary noise, not an attack signal. |
 
 Default posture: `http` and `https` only, credential-bearing URLs always denied with no
 override, and loopback, private ranges, link-local, carrier-grade NAT, `.local` and bare

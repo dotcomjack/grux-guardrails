@@ -199,9 +199,14 @@ final class URLGuardTests: XCTestCase {
         XCTAssertFalse(isAllowed("http://127.0.0.1%2f.example.com/"))
         XCTAssertFalse(isAllowed("http://127.0.0.1%09.example.com/"))
         XCTAssertFalse(isAllowed("http://169.254.169.254%00.example.com/"))
-        // The denial is structural, so it is reported as such rather than as a
-        // private-network hit.
-        XCTAssertEqual(URLGuard.evaluate("http://127.0.0.1%00.example.com/").tag, "URL_DENIED")
+        // This assertion used to read `"URL_DENIED"`, with a comment reasoning that the
+        // denial is structural rather than a private-network hit. That reasoning is
+        // correct and the conclusion was still wrong: it pinned the most attack-shaped
+        // signal the guard emits into the same audit bucket as "empty URL", and
+        // README.md line 142 tells you to alert on the tag. Someone deliberately
+        // smuggling a loopback target past the parser deserves its own label, not the
+        // one that means nothing happened.
+        XCTAssertEqual(URLGuard.evaluate("http://127.0.0.1%00.example.com/").tag, "HOST_SMUGGLING")
     }
 
     /// Percent-decoding that produces a perfectly ordinary host is fine, and must stay
@@ -265,7 +270,12 @@ final class URLGuardTests: XCTestCase {
     /// Regression. canonicalEntry("") and canonicalEntry(".") both reduce to "", so
     /// without a guard a blank line in a config file becomes a trusted-host entry.
     func testBlankTrustedLANEntriesMatchNothing() {
-        for junk in ["", ".", "  ", "\n", "..."] {
+        // The last five are new ways to reduce to empty, added when canonicalEntry
+        // learned to strip schemes, ports, paths and wildcards. Every new stripping rule
+        // is a new way for an entry to collapse to "", and an entry that collapses to ""
+        // would match an empty host, so the guard has to be re-tested each time rather
+        // than assumed to still hold.
+        for junk in ["", ".", "  ", "\n", "...", "*", "*.", "https://", "://", "/path"] {
             let config = URLGuardConfig(trustedLANHosts: [junk])
             XCTAssertFalse(isAllowed("http://127.0.0.1/", config: config))
             XCTAssertFalse(isAllowed("http://router/", config: config))
@@ -374,5 +384,106 @@ extension URLGuardTests {
         // A real public host that merely contains one of those words stays allowed.
         XCTAssertTrue(URLGuard.evaluate("https://metadata.example.com/").isAllowed)
         XCTAssertTrue(URLGuard.evaluate("https://internal.example.com/").isAllowed)
+    }
+
+    /// The reason-to-tag mapping, pinned as a table.
+    ///
+    /// `tag` is derived by searching the reason string for needles, which is a
+    /// hand-maintained list, and it has now silently fallen behind TWICE. First when the
+    /// IPv4 table grew and the new reasons reported as generic URL_DENIED. Then again
+    /// with `illegal character in host`, which is the null-byte smuggling denial and the
+    /// most attack-shaped signal the guard produces: it sat in the same bucket as
+    /// "empty URL" while README.md line 142 tells you to alert on the tag.
+    ///
+    /// A needle list cannot defend itself. This table can, so every new denial reason has
+    /// to be added here, and landing in URL_DENIED by accident now fails the build.
+    func testEveryDenialReasonLandsOnTheIntendedTag() {
+        let table: [(url: String, tag: String)] = [
+            ("http://user:pass@example.com/", "CREDENTIAL_URL"),
+            ("file:///etc/passwd",            "BAD_SCHEME"),
+            ("javascript:alert(1)",           "BAD_SCHEME"),
+            ("http://127.0.0.1%00.example.com/", "HOST_SMUGGLING"),
+            ("http://127.0.0.1",              "PRIVATE_NETWORK"),
+            ("http://10.0.0.5",               "PRIVATE_NETWORK"),
+            ("http://192.168.1.1",            "PRIVATE_NETWORK"),
+            ("http://169.254.169.254/",       "PRIVATE_NETWORK"),
+            ("http://192.0.0.192/",           "PRIVATE_NETWORK"),
+            ("http://100.64.0.1/",            "PRIVATE_NETWORK"),
+            ("http://224.0.0.1/",             "PRIVATE_NETWORK"),
+            ("http://255.255.255.255/",       "PRIVATE_NETWORK"),
+            ("http://0.0.0.0/",               "PRIVATE_NETWORK"),
+            ("http://0177.0.0.1",             "PRIVATE_NETWORK"),
+            ("http://router/",                "PRIVATE_NETWORK"),
+            ("http://nas.local/",             "PRIVATE_NETWORK"),
+            ("http://metadata.google.internal/", "PRIVATE_NETWORK"),
+            ("http://[::1]/",                 "PRIVATE_NETWORK"),
+            ("http://[fd00::1]/",             "PRIVATE_NETWORK"),
+            ("http://[fe80::1]/",             "PRIVATE_NETWORK"),
+            ("http://[2002:7f00:1::]/",       "PRIVATE_NETWORK"),
+            ("http://[64:ff9b::7f00:1]/",     "PRIVATE_NETWORK"),
+            ("http://[64:ff9b:1::7f00:1]/",   "PRIVATE_NETWORK"),
+        ]
+        for (url, expected) in table {
+            let d = URLGuard.evaluate(url)
+            XCTAssertFalse(d.isAllowed, "should be denied: \(url)")
+            XCTAssertEqual(d.tag, expected, "wrong tag for \(url): \(String(describing: d))")
+        }
+        // The generic bucket is for genuinely uninteresting denials, and only those.
+        for url in ["", "http:///path"] {
+            XCTAssertEqual(URLGuard.evaluate(url).tag, "URL_DENIED", "unexpected tag for \(String(reflecting: url))")
+        }
+    }
+
+    /// A denylist fails OPEN when it fails to match, so every plausible way a person
+    /// writes a host has to reduce to the same entry. Each of these blocked NOTHING while
+    /// looking correct in a config file.
+    func testDenylistEntriesSurviveTheWayPeopleActuallyWriteThem() {
+        for entry in ["evil.com", "EVIL.COM", "evil.com.", " evil.com \n", ".evil.com",
+                      "https://evil.com", "http://evil.com/path", "evil.com:443",
+                      "evil.com/path", "*.evil.com", "*evil.com", "https://evil.com:443/x?y=1"] {
+            let cfg = URLGuardConfig(denylist: [entry])
+            XCTAssertFalse(URLGuard.evaluate("http://evil.com/", config: cfg).isAllowed,
+                           "denylist entry blocked nothing: \(String(reflecting: entry))")
+            XCTAssertFalse(URLGuard.evaluate("http://sub.evil.com/", config: cfg).isAllowed,
+                           "subdomain reachable via entry: \(String(reflecting: entry))")
+        }
+        // And none of that may start blocking a host that merely looks similar.
+        let cfg = URLGuardConfig(denylist: ["*.evil.com"])
+        XCTAssertTrue(URLGuard.evaluate("http://notevil.com/", config: cfg).isAllowed)
+        XCTAssertTrue(URLGuard.evaluate("http://evil.com.attacker.net/", config: cfg).isAllowed)
+    }
+
+    /// The README documents the tag vocabulary and tells the reader to alert on it, so
+    /// the code must not be able to emit a tag the README does not name. Reads the real
+    /// file rather than a copy, because a copy drifts and a mirror test that mirrors
+    /// nothing is decoration. Same shape as the pattern-count test in the redactor suite,
+    /// which caught a real drift the moment a provider pattern was added.
+    func testEveryTagTheCodeCanEmitIsDocumentedInTheReadme() throws {
+        let readme = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("README.md"),
+            encoding: .utf8)
+        // Every tag the switch in URLGuardDecision.tag can return.
+        let emitted = ["PRIVATE_NETWORK", "HOST_SMUGGLING", "CREDENTIAL_URL",
+                       "USER_DENYLIST", "BAD_SCHEME", "URL_DENIED"]
+        for tag in emitted {
+            XCTAssertTrue(readme.contains("`\(tag)`"),
+                          "README does not document the \(tag) tag, so nobody will alert on it")
+        }
+        // And each one is actually reachable, so the table documents no ghosts.
+        let reachable = Set([
+            "http://127.0.0.1", "http://127.0.0.1%00.example.com/",
+            "http://user:pass@example.com/", "file:///etc/passwd", "", "http://x.evil.com/",
+        ].map { URLGuard.evaluate($0, config: URLGuardConfig(denylist: ["evil.com"])).tag ?? "nil" })
+        XCTAssertEqual(reachable, Set(emitted), "tag table and reachable tags disagree")
+    }
+
+    /// An unbracketed IPv6 entry has many colons and no port. Stripping at the last one
+    /// would truncate the address into a different, possibly public, one.
+    func testIPv6DenylistEntriesAreNotTruncatedByThePortStripper() {
+        let cfg = URLGuardConfig(trustedLANHosts: ["fd00::1"])
+        XCTAssertTrue(URLGuard.evaluate("http://[fd00::1]/", config: cfg).isAllowed,
+                      "a bare IPv6 trusted-host entry stopped matching")
     }
 }
