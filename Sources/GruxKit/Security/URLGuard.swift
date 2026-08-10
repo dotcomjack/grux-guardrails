@@ -45,6 +45,18 @@ public enum URLGuardDecision: Equatable, Sendable {
         if reason.contains("credential") { return "CREDENTIAL_URL" }
         if reason.contains("denylist") { return "USER_DENYLIST" }
         if reason.contains("scheme") { return "BAD_SCHEME" }
+        // An illegal character in the host is the most attack-shaped signal this guard
+        // produces: `http://127.0.0.1%00.example.com/` is somebody deliberately smuggling
+        // a loopback target past the parser, betting the resolver truncates at the NUL.
+        // It used to land in the generic URL_DENIED bucket alongside "empty URL" and
+        // "missing host", which are ordinary noise, so the one denial that means an
+        // attack is in progress was indistinguishable from a typo.
+        //
+        // This is the SAME drift the comment below describes, one scope up. That fix
+        // covered the reasons privateNetworkReason returns and stopped there, and the
+        // reasons raised inside evaluate() were never in scope. Hence the table test:
+        // a hand-maintained needle list has now silently fallen behind twice.
+        if reason.contains("illegal character") { return "HOST_SMUGGLING" }
         // Every reason produced by privateNetworkReason has to land here. When the IPv4
         // table grew, these strings were not updated, so Oracle Cloud metadata and the
         // broadcast address reported as generic URL_DENIED. An alert keyed on
@@ -210,6 +222,37 @@ public enum URLGuard {
     /// while looking completely correct at the call site.
     private static func canonicalEntry(_ entry: String) -> String {
         var e = entry.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Everything below this line exists because a denylist that fails to match fails
+        // OPEN, so every plausible way a human writes a host has to reduce to the same
+        // string. Case, whitespace and dots were already handled. These four were not,
+        // and each one silently blocked nothing while looking exactly right in a config:
+        //
+        //   "https://evil.com"  a pasted URL, the single most likely mistake
+        //   "evil.com:443"      a host:port copied from a log line
+        //   "evil.com/path"     a pasted link
+        //   "*.evil.com"        the natural spelling of a wildcard, and the one every
+        //                       other tool accepts. Entries already match subdomains, so
+        //                       the star is redundant rather than wrong, which is exactly
+        //                       why dropping it is safe and leaving it was dangerous.
+        if let r = e.range(of: "://") { e = String(e[r.upperBound...]) }
+        if let at = e.lastIndex(of: "@") { e = String(e[e.index(after: at)...]) }
+        if let cut = e.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) {
+            e = String(e[..<cut])
+        }
+        if e.hasPrefix("[") {
+            // Bracketed IPv6 literal, with or without a port.
+            if let close = e.firstIndex(of: "]") {
+                e = String(e[e.index(after: e.startIndex)..<close])
+            }
+        } else if e.filter({ $0 == ":" }).count == 1, let colon = e.lastIndex(of: ":") {
+            // Exactly one colon means host:port. More than one means a bare IPv6
+            // literal, where stripping at the last colon would silently truncate the
+            // address into a different, possibly public, one.
+            e = String(e[..<colon])
+        }
+        while e.hasPrefix("*") { e = String(e.dropFirst()) }
+
         while e.hasSuffix(".") { e = String(e.dropLast()) }
         while e.hasPrefix(".") { e = String(e.dropFirst()) }
         guard !e.isEmpty else { return "" }
