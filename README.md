@@ -31,14 +31,21 @@ promised as shipped that is not.
 ## Install
 
 ```swift
-.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.4.0")
+// Every published tag leaks credentials, including the newest. Until the next release:
+.package(url: "https://github.com/dotcomjack/grux-kit.git", branch: "main")
 ```
 
-**Use 0.4.0 or later.** Every earlier tag is still resolvable and every earlier tag leaks
-credentials: 0.1.0 passes private key bodies straight through to the model and has a
-forgeable injection fence, and 0.2.x leaks the AWS secret access key. They are left
-published so existing checkouts do not break, and documented in
-[CHANGELOG.md](CHANGELOG.md) so nobody adopts one by accident.
+**Every tag published so far leaks credentials, including the newest one.** 0.1.0 passes
+private key bodies straight through to the model and has a forgeable injection fence, 0.2.x
+leaks the AWS secret access key, and **0.4.0, the newest tag, predates every fix in the
+Unreleased section of [CHANGELOG.md](CHANGELOG.md)**. Measured against a real 0.4.0 build,
+a consumer pinned there does not get: the loopback and NAT64 SSRF bypasses, denylist
+entries written any way other than a bare host (`https://evil.com`, `evil.com:443`,
+`*.evil.com` all match nothing, so your own denylist fails open), indented PEM bodies,
+`PGPASSWORD=`, session cookies, `Set-Cookie`, bare `Bearer` headers, or `curl -u`
+passwords. Older tags are left resolvable so existing checkouts do not break.
+
+Until the next tag, take `main`.
 
 Pre-1.0, so treat the minor version as breaking. Pin exactly if that matters to you.
 
@@ -47,6 +54,32 @@ Pre-1.0, so treat the minor version as breaking. Pin exactly if that matters to 
 ```
 
 Requires macOS 13 and Swift 5.9. No third-party dependencies.
+
+**Your own manifest needs `platforms: [.macOS(.v13)]` too.** That line is not optional and
+leaving it out is a build failure, not a warning:
+
+```
+error: the library 'YourAgent' requires macos 10.13, but depends on the product 'GruxKit'
+which requires macos 13.0
+```
+
+So the whole manifest, which is what these instructions used to omit:
+
+```swift
+let package = Package(
+    name: "YourAgent",
+    platforms: [.macOS(.v13)],
+    products: [.library(name: "YourAgent", targets: ["YourAgent"])],
+    dependencies: [.package(url: "https://github.com/dotcomjack/grux-kit.git", branch: "main")],
+    targets: [
+        .target(name: "YourAgent",
+                dependencies: [.product(name: "GruxKit", package: "grux-kit")]),
+    ]
+)
+```
+
+Verified by building it: a fresh `swift package init` plus the two snippets above, and
+nothing else, fails. Adding the `platforms` line builds clean.
 
 ## SecretRedactor
 
@@ -130,8 +163,17 @@ permalink with a real owner and repository name. All three together leave 2.
 The cost is published rather than implied. Against 100,000 random base64 strings at each
 of 40, 64, 128 and 200 characters, generated from a fixed seed so the comparison is causal,
 the name signal newly spares roughly 20 secrets out of 400,000, every one of them carrying
-three or more slashes. That figure is a range, not a point: three independent seeds gave
-12, 19 and 22. An earlier version of this file published the 12 on its own, which was the
+three or more slashes. Measured over ten seeds and 4,000,000 trials: 240 newly spared and
+zero newly caught, which is 24.0 per 400,000, with individual seeds ranging 15 to 31. Two
+earlier one-off runs gave 12 and 22. An earlier version of this file published the 12 alone
+as though a fixed seed made it exact. Seeding makes the COMPARISON exact, since both arms
+see identical inputs, and does nothing about the spread of the estimate.
+
+Two numbers in this section are audit-trail figures from a specific run rather than
+assertions you can re-run: the 814 paths were taken off a working machine and are not in
+this repo, and "the project's own corpus" is measured against this source tree, which grows.
+The pattern count and the tag table are different, and both are mechanically pinned by
+tests that fail if the README drifts. An earlier version of this file published the 12 on its own, which was the
 lowest of the three and was stated as though a seeded run made it exact. Seeding removes
 sampling noise from a COMPARISON, because both sides see identical inputs, and it does
 nothing about the variance of the sample itself.
@@ -176,6 +218,20 @@ string escapes the block, and everything after it reads as your instructions. Th
 one-line bypass, written by the attacker, in the exact input class this function exists to
 handle. With an unguessable id in both tags a forged closer does not match. Tell the model
 in your system prompt that only the closer bearing the matching id ends the block.
+
+**Which means you need the id BEFORE you write the system prompt**, and the two-argument
+form above generates one internally where you cannot reach it. Mint it yourself and pass it
+in:
+
+```swift
+let fenceID = SecretRedactor.newFenceID()
+// ... put fenceID in your system prompt ...
+let block = SecretRedactor.wrapAsUntrusted("screen_ocr", pageText, id: fenceID)
+```
+
+Do not pass a human-readable label as the id. It is only unguessable if it is random, and a
+label defeats the entire mechanism: `"screen_ocr"` always derives the same id, so an
+attacker who sees one transcript can forge the closer in every future one.
 
 The fence still does not make injection impossible. It gives the model a boundary it can
 act on, and it is not a substitute for withholding capabilities the agent did not need.
@@ -336,6 +392,26 @@ change quietly.
 
 **`trustedLANHosts` ships empty.** A default naming somebody's hardware would be a hole in
 your network rather than a convenience, so name your own.
+
+### The three lists, and the one with teeth
+
+```swift
+URLGuardConfig(allowlist: [], denylist: [], trustedLANHosts: [])
+```
+
+`denylist` and `allowlist` match a host **and all of its subdomains**. `trustedLANHosts` is
+exact match only. Denylist beats allowlist.
+
+**`allowlist` overrides the private-network denial, and that is the whole point of it and
+also its teeth.** It is consulted before the private-address checks, so it is how you say
+"I mean it" about a host this guard would otherwise refuse. The consequence is that
+allowlisting a domain allowlists every subdomain of it, **including one that spells a
+private address**. Measured: with `allowlist: ["corp.example"]`, `10-0-0-1.corp.example`
+goes from denied to allowed. A domain with wildcard DNS therefore hands back exactly the
+SSRF surface this guard exists to remove.
+
+That is the operator's call to make, which is why it is not disabled, but it should be a
+decision rather than a discovery. There is a test pinning both directions.
 
 What it *does* cover is the string-level evasion, which is the part people get wrong by
 hand: every IP spelling in the table above, credential smuggling, and percent-decoded

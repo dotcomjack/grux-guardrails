@@ -847,15 +847,17 @@ public enum SecretRedactor {
         // Price, measured causally rather than estimated. 100,000 random base64 strings at
         // each of 40, 64, 128 and 200 characters, generated from a fixed seed and run
         // through the redactor with and without this rule, so the difference is the exact
-        // set of secrets newly spared and not a sampling artefact. Roughly 20 out of
-        // 400,000, every one carrying three or more slashes, against 355 of 814 real paths
-        // that stopped being destroyed. Without the vowel test the cost roughly triples.
+        // set of secrets newly spared and not a sampling artefact. 24.0 per 400,000,
+        // measured over ten seeds and 4,000,000 trials as 240 newly spared against zero
+        // newly caught, against 355 of 814 real paths that stopped being destroyed.
+        // Without the vowel test the cost roughly triples.
         //
-        // "Roughly" is doing real work there and the first version of this comment did not
-        // have it. Three independent seeds give 12, 19 and 22, and the 12 was published
-        // alone as though the seed made it exact. A fixed seed makes the COMPARISON exact,
-        // because both sides see identical inputs, and says nothing about how much the
-        // sample itself moves.
+        // The first version of this comment said "twelve" and meant it as a fact. Ten seeds
+        // range from 15 to 31, and two earlier one-off runs gave 12 and 22, so the twelve
+        // was the lowest of everything measured and was published alone as though the seed
+        // made it exact. A fixed seed makes the COMPARISON exact, because both arms see
+        // identical inputs, and says nothing about how much the estimate itself moves.
+        // Seeding removes the noise between two arms, never the noise in the number.
         if segmentCount >= 4 && namelikeSegments >= 3 && namelikeSegments * 2 >= segmentCount { return false }
 
         return upper && lower && digit && runLength >= 32
