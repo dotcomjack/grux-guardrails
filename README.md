@@ -63,9 +63,14 @@ error: the library 'YourAgent' requires macos 10.13, but depends on the product 
 which requires macos 13.0
 ```
 
-So the whole manifest, which is what these instructions used to omit:
+So the whole manifest, and this time it really is the whole file, opening pragma and import
+included. Without those two lines a literal copy of the block fails with an error about
+Swift tools version 3.1.0, which tells you nothing about what is actually wrong:
 
 ```swift
+// swift-tools-version: 5.9
+import PackageDescription
+
 let package = Package(
     name: "YourAgent",
     platforms: [.macOS(.v13)],
@@ -78,8 +83,10 @@ let package = Package(
 )
 ```
 
-Verified by building it: a fresh `swift package init` plus the two snippets above, and
-nothing else, fails. Adding the `platforms` line builds clean.
+Both claims here were checked by building them. A fresh `swift package init` plus the two
+isolated snippets above and nothing else fails on the platform mismatch; adding the
+`platforms` line builds clean. The block immediately above was pasted byte for byte into an
+empty file and built on its own.
 
 ## SecretRedactor
 
@@ -160,23 +167,20 @@ re-bases the second signal's statistics on the remainder. Measured across 814 re
 and URLs, the first two signals alone destroyed 357 of them, 43.9%, including every GitHub
 permalink with a real owner and repository name. All three together leave 2.
 
-The cost is published rather than implied. Against 100,000 random base64 strings at each
-of 40, 64, 128 and 200 characters, generated from a fixed seed so the comparison is causal,
-the name signal newly spares roughly 20 secrets out of 400,000, every one of them carrying
-three or more slashes. Measured over ten seeds and 4,000,000 trials: 240 newly spared and
-zero newly caught, which is 24.0 per 400,000, with individual seeds ranging 15 to 31. Two
-earlier one-off runs gave 12 and 22. An earlier version of this file published the 12 alone
-as though a fixed seed made it exact. Seeding makes the COMPARISON exact, since both arms
-see identical inputs, and does nothing about the spread of the estimate.
+The cost is published rather than implied. Against 100,000 random base64 strings at each of
+40, 64, 128 and 200 characters, generated from a fixed seed so the comparison is causal, the
+name signal newly spares 24.0 secrets per 400,000, every one of them carrying three or more
+slashes. Measured over ten seeds and 4,000,000 trials: 240 newly spared, zero newly caught,
+individual seeds ranging 15 to 31. Two earlier one-off runs gave 12 and 22, and an earlier
+version of this file published that 12 alone as though a fixed seed made it exact. Seeding
+makes the COMPARISON exact, since both arms see identical inputs, and does nothing about the
+spread of the estimate.
 
 Two numbers in this section are audit-trail figures from a specific run rather than
 assertions you can re-run: the 814 paths were taken off a working machine and are not in
 this repo, and "the project's own corpus" is measured against this source tree, which grows.
 The pattern count and the tag table are different, and both are mechanically pinned by
-tests that fail if the README drifts. An earlier version of this file published the 12 on its own, which was the
-lowest of the three and was stated as though a seeded run made it exact. Seeding removes
-sampling noise from a COMPARISON, because both sides see identical inputs, and it does
-nothing about the variance of the sample itself.
+tests that fail if the README drifts.
 
 **The first signal was also the largest hole in the published leak rate, which nobody had
 noticed because the number was being read as a general weakness.** An empty leading segment
