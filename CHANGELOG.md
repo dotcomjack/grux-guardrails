@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.5.0, 2026-08-10
+
+Eight audit rounds of the redactor and the URL guard. Every defect below was found by
+measurement or by planting a failure, and the numbers are from real runs rather than
+estimates. Read the round-eight sections first: two of them describe defects that a fix in
+this same release had introduced.
 
 ### Eighth audit, the path heuristic
 

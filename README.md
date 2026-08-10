@@ -31,21 +31,27 @@ promised as shipped that is not.
 ## Install
 
 ```swift
-// Every published tag leaks credentials, including the newest. Until the next release:
-.package(url: "https://github.com/dotcomjack/grux-kit.git", branch: "main")
+.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.5.0")
 ```
 
-**Every tag published so far leaks credentials, including the newest one.** 0.1.0 passes
-private key bodies straight through to the model and has a forgeable injection fence, 0.2.x
-leaks the AWS secret access key, and **0.4.0, the newest tag, predates every fix in the
-Unreleased section of [CHANGELOG.md](CHANGELOG.md)**. Measured against a real 0.4.0 build,
-a consumer pinned there does not get: the loopback and NAT64 SSRF bypasses, denylist
-entries written any way other than a bare host (`https://evil.com`, `evil.com:443`,
-`*.evil.com` all match nothing, so your own denylist fails open), indented PEM bodies,
-`PGPASSWORD=`, session cookies, `Set-Cookie`, bare `Bearer` headers, or `curl -u`
-passwords. Older tags are left resolvable so existing checkouts do not break.
+**Use 0.5.0. Every earlier tag leaks credentials, and each one looked fine when it was
+cut.** That second half is the part worth reading: five tags have been published and all
+five were later found to leak, including by audits of code that had already survived several
+earlier ones. 0.5.0 is the most heavily audited state this library has been in and that is a
+statement about effort, not a guarantee.
 
-Until the next tag, take `main`.
+What the earlier tags actually do. 0.1.0 passes private key bodies straight through to the
+model and has a forgeable injection fence. 0.2.x leaks the AWS secret access key. And
+0.4.0, measured against a real build of it rather than inferred from its changelog, allows
+the loopback and NAT64 SSRF bypasses and leaks indented PEM bodies, `PGPASSWORD=`, session
+cookies, `Set-Cookie`, bare `Bearer` headers and `curl -u` passwords. Worst of that set,
+and the one to check if you have ever pinned it: **a denylist entry written any way other
+than a bare host matches nothing at all.** `https://evil.com`, `evil.com:443` and
+`*.evil.com` are all silently inert against `denylist: ["evil.com"]`, so your own denylist
+fails open and looks configured.
+
+Earlier tags stay resolvable so existing checkouts do not break, and are documented in
+[CHANGELOG.md](CHANGELOG.md) so nobody adopts one by accident.
 
 Pre-1.0, so treat the minor version as breaking. Pin exactly if that matters to you.
 
@@ -75,7 +81,7 @@ let package = Package(
     name: "YourAgent",
     platforms: [.macOS(.v13)],
     products: [.library(name: "YourAgent", targets: ["YourAgent"])],
-    dependencies: [.package(url: "https://github.com/dotcomjack/grux-kit.git", branch: "main")],
+    dependencies: [.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.5.0")],
     targets: [
         .target(name: "YourAgent",
                 dependencies: [.product(name: "GruxKit", package: "grux-kit")]),
