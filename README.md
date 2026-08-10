@@ -180,6 +180,10 @@ none of them survive a naive dotted-quad parse:
 127.0.0x.1              a bare `0x` label, which inet_aton reads as zero
 127.0.0.1.nip.io        a wildcard resolver that answers with the address in the name
 10-0-0-1.nip.io         the same thing in the dashed spelling
+lvh.me                  resolves to loopback with NO address in the name, so it has to
+                        be named rather than derived, and that list is best effort
+[64:ff9b:1:808:a:0:100:0] 10.0.0.1 at the /64 NSP slot, with public decoys parked in
+                        both of the slots a naive check reads
 evil.com.               trailing-dot FQDN, resolves identically, different string
 evil.com..              and the same trick with a second dot, which is a different
                         string again and has to reduce to the same entry

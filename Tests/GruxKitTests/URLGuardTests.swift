@@ -519,13 +519,37 @@ extension URLGuardTests {
     /// RFC 6052 puts the embedded IPv4 in a different place for every prefix length. Only
     /// the /96 position was read, so a public decoy in the tail hid the real target where
     /// the standard actually puts it for a /48.
-    func testNAT64LocalUsePrefixDecodesTheRFC6052SlotForIts48() {
+    func testNAT64LocalUsePrefixDecodesEveryRFC6052Slot() {
         XCTAssertFalse(URLGuard.evaluate("http://[64:ff9b:1:7f00:0:1:808:808]/").isAllowed,
                        "loopback at the /48 slot reached, with a public decoy in the tail")
         XCTAssertFalse(URLGuard.evaluate("http://[64:ff9b:1:0a00:0:1:808:808]/").isAllowed)
-        // The /96 form with an empty /48 slot is not a /48 embedding of 0.0.0.0, and a
-        // public address wrapped in the local-use prefix must stay allowed.
+        // The one that defeated the first version of this fix. Public 8.8.10.0 sits in the
+        // /48 slot and public 1.0.0.0 in the /96 slot, so both positions the code used to
+        // read say "allow", while 10.0.0.1 sits where a /64 NSP puts it. Checking one
+        // prefix length is a guess, not a fix, because RFC 8215 reserves the whole /48 for
+        // local use and an operator may deploy any NSP length inside it.
+        XCTAssertFalse(URLGuard.evaluate("http://[64:ff9b:1:808:a:0:100:0]/").isAllowed,
+                       "10.0.0.1 reached through a /64 NSP with decoys in the /48 and /96 slots")
+        // A public address wrapped in the local-use prefix must stay allowed. Its unused
+        // slots read as 0.x, which is why a zero first octet is skipped rather than denied.
         XCTAssertTrue(URLGuard.evaluate("http://[64:ff9b:1::0808:0808]/").isAllowed)
+        XCTAssertTrue(URLGuard.evaluate("http://[64:ff9b::0808:0808]/").isAllowed)
+    }
+
+    /// The other half of the wildcard-DNS problem. `127.0.0.1.nip.io` carries its target
+    /// in the labels and is beaten by reading the address out. `lvh.me` does not: it is an
+    /// ordinary-looking domain whose A record is 127.0.0.1, so there is nothing to extract
+    /// and naming it is the only option.
+    func testLoopbackAliasDomainsAreDenied() {
+        for h in ["http://localtest.me/", "http://lvh.me/", "http://app.localtest.me/",
+                  "http://lvh.me:3000/admin", "http://localho.st/", "http://vcap.me/"] {
+            XCTAssertFalse(URLGuard.evaluate(h).isAllowed, "reachable: \(h)")
+            XCTAssertEqual(URLGuard.evaluate(h).tag, "PRIVATE_NETWORK", "wrong tag: \(h)")
+        }
+        // Suffix matching must stay segment-aware: a real domain that merely ends in the
+        // same letters is not an alias.
+        XCTAssertTrue(URLGuard.evaluate("https://notlvh.me/").isAllowed)
+        XCTAssertTrue(URLGuard.evaluate("https://mylocaltest.me/").isAllowed)
     }
 
     /// The attacker picked the audit label. `evaluate` interpolates the scheme into its
