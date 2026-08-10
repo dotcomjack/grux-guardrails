@@ -62,13 +62,31 @@ first pass missed.
   dotted and dashed spellings, rather than the service, because blocking a list of these
   costs the attacker one domain registration to defeat.
 
-- **NAT64 local-use `/48` read the wrong bytes.** RFC 6052 puts the embedded IPv4 in a
-  different place for every prefix length, and only the `/96` position was ever read, so
-  `64:ff9b:1:7f00:0:1:808:808` carried loopback where the standard puts it for a `/48`
-  and a public decoy where the code was looking. Both positions are checked now. An
-  existing test caught the first version of this fix denying a legitimately public
-  address, which is the argument for keeping must-stay-allowed assertions beside the
-  must-be-denied ones.
+  `lvh.me` and `localtest.me` are the other half of that problem and need the opposite
+  answer. They resolve to loopback without carrying an address in the name, so there is
+  nothing to extract and naming them is the only option available. That list is best
+  effort by construction, and the general case is the same limitation as DNS rebinding:
+  this guard does not resolve, so it cannot see where a name points. Said plainly in the
+  README rather than implied.
+
+- **NAT64 local-use read the wrong bytes, and the first fix for it was also wrong.**
+  RFC 6052 puts the embedded IPv4 in a different place for every Network-Specific Prefix
+  length, and only the `/96` position was ever read, so `64:ff9b:1:7f00:0:1:808:808`
+  carried loopback where the standard puts it for a `/48` and a public decoy where the
+  code was looking.
+
+  Adding the `/48` position closed that one input and nothing else.
+  `64:ff9b:1:808:a:0:100:0` parks a public `8.8.10.0` in the `/48` slot and a public
+  `1.0.0.0` in the `/96` slot while carrying `10.0.0.1` where a `/64` NSP puts it, and it
+  was still allowed. RFC 8215 reserves the whole `/48` for local use, so an operator may
+  deploy any NSP length inside it and nothing in the address says which, which makes
+  checking one length a guess rather than a fix. All six positions are checked now.
+
+  Being aggressive costs nothing here, because every address in that range is by
+  definition a translation of some IPv4 and there is no legitimate public IPv6 host to
+  over-deny. A slot whose first octet is zero is skipped, since that is what an unused
+  slot reads as: without that, the empty slots of an ordinary `/96` translation denied it,
+  and an existing must-stay-allowed test is what caught it.
 
 - **`http://evil.com../` walked past the denylist.** `evaluate` stripped one trailing dot
   while `canonicalEntry` stripped all of them, so the two never compared equal. The same

@@ -202,6 +202,23 @@ public enum URLGuard {
         "169.254.169.254.nip.io",         // wildcard DNS that resolves to the metadata IP
     ]
 
+    /// Domains that resolve to loopback WITHOUT carrying the address in the name.
+    ///
+    /// These are the other half of the wildcard-DNS problem and they need a different
+    /// answer. `127.0.0.1.nip.io` is caught by reading the address out of the labels,
+    /// which beats the whole family at once. `lvh.me` and `localtest.me` have no address
+    /// to read: they are ordinary-looking domains whose A record is 127.0.0.1, so naming
+    /// them is the only option available.
+    ///
+    /// Matched as suffixes, because every subdomain resolves the same way, which is the
+    /// entire reason developers use them. This list is best effort by construction, and
+    /// the general defence against the ones nobody has enumerated is the same as for DNS
+    /// rebinding: this guard does not resolve, so it cannot see where a name points.
+    /// Stated in README.md rather than implied.
+    private static let loopbackAliasDomains: [String] = [
+        "localtest.me", "lvh.me", "localho.st", "vcap.me", "readme.localhost",
+    ]
+
     /// Characters that can never appear in a real hostname and therefore indicate
     /// smuggling: control codes including NUL, whitespace, and the delimiters that
     /// separate a host from the rest of a URL.
@@ -348,6 +365,9 @@ public enum URLGuard {
         // 1918 address in its own labels is doing that on purpose, and the cost of being
         // wrong is one allowlist entry against an SSRF that otherwise just works.
         if let reason = embeddedPrivateIPv4Reason(host) { return reason }
+        for domain in loopbackAliasDomains where host == domain || host.hasSuffix("." + domain) {
+            return "loopback (wildcard DNS alias)"
+        }
 
         // mDNS and Bonjour hosts are LAN by definition.
         if host.hasSuffix(".local") { return "mDNS .local host (LAN)" }
@@ -523,16 +543,35 @@ public enum URLGuard {
             // the union costs a public IPv6 that happens to collide, which is a far
             // cheaper mistake than the one this replaces.
             if nat64LocalUse {
-                let v4At48 = (Int(bytes[6]), Int(bytes[7]), Int(bytes[9]), Int(bytes[10]))
-                // An all-zero slot means this is the /96 form with an empty /48 field, not
-                // a /48 embedding of 0.0.0.0. Without this the union denied
-                // `64:ff9b:1::0808:0808`, a public address wrapped in the local-use
-                // prefix, because the empty slot reads as the unspecified address. An
-                // existing test caught it, which is the entire argument for keeping tests
-                // that assert what must STAY allowed next to the ones that assert denial.
-                let slotIsEmpty = bytes[6] == 0 && bytes[7] == 0 && bytes[9] == 0 && bytes[10] == 0
-                if !slotIsEmpty, let reason = privateIPv4Reason(v4At48) {
-                    return "\(reason) (embedded in NAT64 /48)"
+                // RFC 6052 section 2.2 puts the embedded IPv4 in a different place for
+                // every Network-Specific Prefix length, always skipping byte 8, the
+                // u-octet. RFC 8215 reserves this whole /48 for local use, so an operator
+                // may deploy ANY of these lengths inside it and nothing in the address
+                // says which one is in force.
+                //
+                // Checking one length is therefore not a fix, it is a guess, and the first
+                // version of this checked only /48 and was defeated by
+                // `64:ff9b:1:808:a:0:100:0`, which parks a public 8.8.10.0 in the /48 slot
+                // and 1.0.0.0 in the /96 slot while carrying 10.0.0.1 where a /64 NSP puts
+                // it. Every slot is checked now and any private hit denies.
+                //
+                // Being aggressive here is free: every address in this range is BY
+                // DEFINITION a translation of some IPv4, so there is no legitimate public
+                // IPv6 host to over-deny. A slot whose first octet is zero is skipped,
+                // because 0.0.0.0/8 is what an unused slot reads as rather than a target
+                // anybody is trying to reach, and without that skip the empty slots of a
+                // perfectly ordinary /96 translation deny it.
+                let slots: [(String, (Int, Int, Int, Int))] = [
+                    ("/32", (Int(bytes[4]), Int(bytes[5]), Int(bytes[6]), Int(bytes[7]))),
+                    ("/40", (Int(bytes[5]), Int(bytes[6]), Int(bytes[7]), Int(bytes[9]))),
+                    ("/48", (Int(bytes[6]), Int(bytes[7]), Int(bytes[9]), Int(bytes[10]))),
+                    ("/56", (Int(bytes[7]), Int(bytes[9]), Int(bytes[10]), Int(bytes[11]))),
+                    ("/64", (Int(bytes[9]), Int(bytes[10]), Int(bytes[11]), Int(bytes[12]))),
+                ]
+                for (length, v4) in slots where v4.0 != 0 {
+                    if let reason = privateIPv4Reason(v4) {
+                        return "\(reason) (embedded in NAT64 \(length))"
+                    }
                 }
             }
             return nil // embedded public IPv4
