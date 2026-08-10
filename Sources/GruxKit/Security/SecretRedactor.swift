@@ -50,9 +50,22 @@ public enum SecretRedactor {
             // every marker rescans the rest of the document. A 1.2MB hostile page took
             // 72 seconds. This form does the same work in under 10 milliseconds, because
             // a body line that is not base64 stops the match immediately.
+            // The `[ \t]*` AFTER each line break is load-bearing and was missing. A PEM
+            // indented inside YAML, JSON, a markdown block or a code sample matched its
+            // header and stopped there, and the body then depended entirely on the
+            // entropy pass to rescue it. Measured: an indented block whose body line is
+            // single-case base64 carries no digit and no mixed case, so entropy cannot
+            // see it either, and the key body reached the model VERBATIM while the
+            // header sat above it reading `[REDACTED:PEM]`. The unindented form of the
+            // same block is consumed whole, which is what made it look fine.
+            //
+            // This is the third instance of one defect. The comment on the JSON variant
+            // below describes it happening with escaped newlines, and the fix there was
+            // the same shape. Whitespace around a line break is not decoration when the
+            // pattern is line-anchored.
             ("PEM", #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"#
-                  + #"(?:[ \t]*[\r\n]+[A-Za-z0-9+/=]{4,})*"#
-                  + #"(?:[ \t]*[\r\n]+-----END [A-Z0-9 ]*PRIVATE KEY-----)?"#),
+                  + #"(?:[ \t]*[\r\n]+[ \t]*[A-Za-z0-9+/=]{4,})*"#
+                  + #"(?:[ \t]*[\r\n]+[ \t]*-----END [A-Z0-9 ]*PRIVATE KEY-----)?"#),
             // The same block after JSON encoding, where every newline is the two
             // characters backslash-n rather than an actual line break.
             //
@@ -64,8 +77,8 @@ public enum SecretRedactor {
             // entropy pass only rescues the ones that happen to carry mixed case and a
             // digit. A base64 line that happens to be single case walked straight out.
             ("PEM", #"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"#
-                  + #"(?:\\r?\\n[A-Za-z0-9+/=]{4,})*"#
-                  + #"(?:\\r?\\n-----END [A-Z0-9 ]*PRIVATE KEY-----)?"#),
+                  + #"(?:\\r?\\n[ \t]*[A-Za-z0-9+/=]{4,})*"#
+                  + #"(?:\\r?\\n[ \t]*-----END [A-Z0-9 ]*PRIVATE KEY-----)?"#),
             ("ANTHROPIC_KEY", L + #"sk-ant-[A-Za-z0-9_\-]{10,}"#),
             // Generic OpenAI-style secret key (sk-... and sk-proj-...). Runs after the
             // more specific sk-ant- so Anthropic keys keep their own tag. The 16-char
@@ -513,6 +526,18 @@ public enum SecretRedactor {
 
     /// Deterministic variant, for tests and for callers that need to reference the same
     /// fence id in their system prompt. Prefer the random one everywhere else.
+    ///
+    /// **Do not pass a human-readable label here.** An id that is not already strong hex
+    /// is hashed with FNV-1a, which is unkeyed, so `id: "screen_ocr"` emits
+    /// `f942782c85ee7d92` on every machine that has ever run this code and anyone can
+    /// recompute it offline in six lines. That hands back the forgery the id exists to
+    /// prevent. The hashing is still the right behaviour, because the alternative it
+    /// replaced silently truncated the label to a six-character stub, which was worse:
+    /// this at least yields a full-width id. But the warning belonged out here, on the
+    /// function a caller actually reads, rather than on the private helper.
+    ///
+    /// If you need a stable id, generate ONE strong random id, `newFenceID()`, and paste
+    /// the literal into your system prompt. A 16-hex-character id is used verbatim.
     public static func wrapAsUntrusted(_ kind: String, _ body: String, id: String) -> String {
         let safeKind = kind.filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
         // Do NOT silently strip non-hex characters. Doing that turned a caller's ordinary
@@ -525,8 +550,29 @@ public enum SecretRedactor {
         // Belt and braces. The id alone already makes a forged closer useless, since the
         // attacker cannot guess it, but neutralising the literal keeps the transcript
         // readable and removes any doubt about what closed the block.
+        //
+        // Both tags, and case insensitively. This handled `</untrusted_data` only, exactly
+        // spelled, which left two gaps in a defence whose entire job is to be unambiguous:
+        //
+        //   `</UNTRUSTED_DATA id="...">` passed through untouched, and a model reading a
+        //   transcript does not owe you case sensitivity when every markup language it has
+        //   ever seen is case-insensitive about tags.
+        //
+        //   The OPENING literal passed through too. That one does not escape the block,
+        //   the real closer still carries the real id and still ends it, so the original
+        //   framing of this as an escape is wrong. What it does is let the body open a
+        //   second, nested block with an attacker-chosen `kind`, so a page can print
+        //   `<untrusted_data kind="operator_policy">` and invite the model to read what
+        //   follows as a more trusted class of content. The fence exists to make the
+        //   trust boundary unambiguous, and an attacker who can draw a boundary of their
+        //   own inside it has taken exactly that away.
+        //
+        // Neither is a substring of the other, so the order of these two does not matter.
         let neutralised = redact(body)
-            .replacingOccurrences(of: "</untrusted_data", with: "<\u{200B}/untrusted_data")
+            .replacingOccurrences(of: "</untrusted_data", with: "<\u{200B}/untrusted_data",
+                                  options: .caseInsensitive)
+            .replacingOccurrences(of: "<untrusted_data", with: "<\u{200B}untrusted_data",
+                                  options: .caseInsensitive)
         return "<untrusted_data kind=\"\(safeKind)\" id=\"\(safeID)\">\n"
             + neutralised
             + "\n</untrusted_data id=\"\(safeID)\">"

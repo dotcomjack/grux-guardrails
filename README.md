@@ -174,8 +174,15 @@ none of them survive a naive dotted-quad parse:
 [::ffff:127.0.0.1]      IPv4-mapped IPv6
 [::ffff:7f00:1]         the same thing spelled in hex
 [64:ff9b::7f00:1]       NAT64 well-known prefix
+[64:ff9b:1:7f00:0:1:808:808]  NAT64 local-use /48, target where RFC 6052 puts it for
+                        a /48, with a public decoy parked in the trailing bytes
 [::ffff:169.254.169.254] cloud metadata in an IPv6 costume
+127.0.0x.1              a bare `0x` label, which inet_aton reads as zero
+127.0.0.1.nip.io        a wildcard resolver that answers with the address in the name
+10-0-0-1.nip.io         the same thing in the dashed spelling
 evil.com.               trailing-dot FQDN, resolves identically, different string
+evil.com..              and the same trick with a second dot, which is a different
+                        string again and has to reduce to the same entry
 ```
 
 Every line above is a test case. The trailing dot one matters more than it looks: it has

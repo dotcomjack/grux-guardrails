@@ -93,6 +93,20 @@ enum Corpus {
         Case(label: "scheme/bare-bearer", text: "Bearer 8f14e45fceea167a5a36dedd4bea2543", secret: "8f14e45fceea167a5a36dedd4bea2543"),
         Case(label: "flag/curl-u", text: "curl -u deploybot:hunter2Passw0rd https://api.acme.io", secret: "hunter2Passw0rd"),
         Case(label: "flag/long-password", text: "deploy --password s3cretPassw0rdForProd --verbose", secret: "s3cretPassw0rdForProd"),
+
+        // Round 7. An INDENTED PEM. The whole-block pattern is line-anchored and had no
+        // tolerance for leading whitespace, so a key inside YAML, JSON, a markdown block
+        // or a code sample matched its header and stopped. The body then depended
+        // entirely on the entropy pass, which needs mixed case AND a digit, so a
+        // single-case base64 line walked out verbatim underneath a header that had been
+        // helpfully replaced with [REDACTED:PEM]. The unindented form was consumed whole,
+        // which is exactly what made it look covered.
+        Case(label: "pem/indented",
+             text: "  -----BEGIN RSA PRIVATE KEY-----\n  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  -----END RSA PRIVATE KEY-----",
+             secret: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        Case(label: "pem/yaml-block",
+             text: "tls:\n  key: |\n    -----BEGIN PRIVATE KEY-----\n    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n    -----END PRIVATE KEY-----",
+             secret: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
     ]
 
     // MARK: - Must never be modified
@@ -169,5 +183,20 @@ enum Corpus {
         // A uid:gid pair is not a credential, which is why the -u rule needs six
         // characters on the password half.
         "docker run -u 1000:1000 alpine",
+
+        // Round 7. These four are the ONLY entries that exercise the whitespace-separable
+        // name brake, and they exist because neutering that brake left all 82 tests green.
+        // It shipped in round six with a CHANGELOG paragraph and no coverage at all: every
+        // prose case written to justify it was actually being saved by the LOCATOR brake
+        // sitting next to it, because each one happened to contain a URL, a path or a
+        // filename. A guard that cannot be broken by a test is a guard nobody is checking.
+        //
+        // Each of these has a credential word buried inside a longer token, then
+        // whitespace, then a value that clears the credential-shape brake and is not a
+        // locator. Delete isWhitespaceSeparable and every one of them is destroyed.
+        "the keyboard Serial9912345 was replaced",
+        "the passenger Manifest2024 boarded early",
+        "authorial Voice2026 is the whole point",
+        "a keystone Species4471 went extinct",
     ]
 }

@@ -42,21 +42,36 @@ public enum URLGuardDecision: Equatable, Sendable {
     /// Coarse category for the denial, suitable for an audit log or a metric label.
     public var tag: String? {
         guard case .denied(let reason) = self else { return nil }
-        if reason.contains("credential") { return "CREDENTIAL_URL" }
-        if reason.contains("denylist") { return "USER_DENYLIST" }
-        if reason.contains("scheme") { return "BAD_SCHEME" }
+
+        // The fixed reasons match EXACTLY, and the scheme reason matches on its prefix,
+        // because that reason interpolates the attacker's own scheme string into itself.
+        // Substring scanning meant the attacker picked the audit label: `denylist://x`
+        // produced "scheme 'denylist' not allowed" and reported as USER_DENYLIST, and
+        // `credential://x` reported as CREDENTIAL_URL. Anyone counting denial classes was
+        // reading numbers a hostile input could move.
+        if reason.hasPrefix("scheme ") { return "BAD_SCHEME" }
+        if reason == "credential-bearing URL" { return "CREDENTIAL_URL" }
+        if reason == "host on user denylist" { return "USER_DENYLIST" }
         // An illegal character in the host is the most attack-shaped signal this guard
         // produces: `http://127.0.0.1%00.example.com/` is somebody deliberately smuggling
         // a loopback target past the parser, betting the resolver truncates at the NUL.
         // It used to land in the generic URL_DENIED bucket alongside "empty URL" and
         // "missing host", which are ordinary noise, so the one denial that means an
         // attack is in progress was indistinguishable from a typo.
+        if reason == "illegal character in host" { return "HOST_SMUGGLING" }
+        // Matched before the needle scan below, because "unparseable URL" contains
+        // "unparseable", a needle added for "unparseable IPv6 literal", so a plain
+        // malformed URL was reporting as PRIVATE_NETWORK.
+        if reason == "empty URL" || reason == "unparseable URL" || reason == "missing host" {
+            return "URL_DENIED"
+        }
+        // Everything above matches exactly or on a prefix. Everything below is a needle
+        // scan over the reasons privateNetworkReason returns, and that list has now
+        // silently fallen behind twice: once when the IPv4 table grew, and once for
+        // `illegal character in host`, which was raised in evaluate() and so was never in
+        // the earlier fix's scope at all. A hand-maintained needle list cannot defend
+        // itself, which is why testEveryDenialReasonLandsOnTheIntendedTag pins the table.
         //
-        // This is the SAME drift the comment below describes, one scope up. That fix
-        // covered the reasons privateNetworkReason returns and stopped there, and the
-        // reasons raised inside evaluate() were never in scope. Hence the table test:
-        // a hand-maintained needle list has now silently fallen behind twice.
-        if reason.contains("illegal character") { return "HOST_SMUGGLING" }
         // Every reason produced by privateNetworkReason has to land here. When the IPv4
         // table grew, these strings were not updated, so Oracle Cloud metadata and the
         // broadcast address reported as generic URL_DENIED. An alert keyed on
@@ -122,7 +137,12 @@ public enum URLGuard {
         // that resolves identically. Normalize it away BEFORE any host comparison, or
         // one appended dot walks straight past the denylist and the matching below.
         var host = rawHost.lowercased()
-        if host.hasSuffix(".") { host = String(host.dropLast()) }
+        // `while`, not `if`. This stripped exactly ONE trailing dot while canonicalEntry
+        // stripped all of them, and that asymmetry was a denylist bypass: `evil.com..`
+        // reduced to `evil.com.` here, the entry reduced to `evil.com`, and the two never
+        // compared equal. Same class of bug as the single trailing dot this line was
+        // originally written to fix, reintroduced by fixing only one side of it.
+        while host.hasSuffix(".") { host = String(host.dropLast()) }
 
         // Structural validation, and it has to happen here rather than later.
         //
@@ -313,6 +333,22 @@ public enum URLGuard {
         }
         if metadataHostnames.contains(host) { return "cloud or container metadata hostname" }
 
+        // Wildcard-resolver hostnames that carry their target IP in the NAME.
+        //
+        // nip.io, sslip.io and their kin answer `<anything>.10.0.0.1.nip.io` with
+        // 10.0.0.1, which turns any private address into an ordinary-looking public
+        // domain and walks past every check above. The metadata table already carried
+        // `169.254.169.254.nip.io`, so the technique was known and one instance of it was
+        // blocked while the general shape, including plain `127.0.0.1.nip.io`, was not.
+        // Blocking a list of these services is a losing game, because a new one costs a
+        // domain, so the embedded ADDRESS is what gets judged instead of the service.
+        //
+        // Deliberately over-broad: `127.0.0.1.example.com` is denied too, on a domain
+        // that has nothing to do with nip.io. A hostname spelling out a loopback or RFC
+        // 1918 address in its own labels is doing that on purpose, and the cost of being
+        // wrong is one allowlist entry against an SSRF that otherwise just works.
+        if let reason = embeddedPrivateIPv4Reason(host) { return reason }
+
         // mDNS and Bonjour hosts are LAN by definition.
         if host.hasSuffix(".local") { return "mDNS .local host (LAN)" }
 
@@ -366,6 +402,36 @@ public enum URLGuard {
         return (octets[0], octets[1], octets[2], octets[3])
     }
 
+    /// A private IPv4 written into the LABELS of an otherwise ordinary hostname, in
+    /// either the dotted form `10.0.0.1.nip.io` or the dashed form `10-0-0-1.nip.io`.
+    /// Both are what the wildcard-DNS services answer with, and the dashed one is the
+    /// spelling that survives being used as a TLS subdomain.
+    private static func embeddedPrivateIPv4Reason(_ host: String) -> String? {
+        let labels = host.split(separator: ".").map(String.init)
+        // Every window of four consecutive labels, because the address is not always at
+        // the front: `foo.127.0.0.1.nip.io` resolves just as well. The count guard is
+        // scoped to THIS loop and not the whole function, which it was at first: a
+        // three-label host like `10-0-0-1.nip.io` returned early and the dashed check
+        // below never ran at all, so the fix shipped covering half the shapes it named.
+        if labels.count > 4 {
+            for i in 0...(labels.count - 4) {
+                let quad = labels[i..<(i + 4)].joined(separator: ".")
+                if let octets = ipv4Octets(quad), let reason = privateIPv4Reason(octets) {
+                    return "\(reason) (embedded in hostname)"
+                }
+            }
+        }
+        for label in labels {
+            let parts = label.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 4 else { continue }
+            if let octets = ipv4Octets(parts.joined(separator: ".")),
+               let reason = privateIPv4Reason(octets) {
+                return "\(reason) (embedded in hostname)"
+            }
+        }
+        return nil
+    }
+
     /// True when every dot-separated label is a number in some radix (decimal or 0x
     /// hex). Such a host can only be an IP literal, because real domains always end in
     /// a non-numeric TLD.
@@ -376,7 +442,13 @@ public enum URLGuard {
             guard !label.isEmpty else { return false }
             let isDecimal = label.allSatisfy { $0.isASCII && $0.isNumber }
             let lower = label.lowercased()
-            let isHex = lower.hasPrefix("0x") && lower.count > 2
+            // `count > 2` was `count > 2` on the whole label, so a BARE `0x` with no
+            // digits after it counted as neither decimal nor hex, the whole host was
+            // judged non-numeric, and `http://127.0.0x.1/` was ALLOWED. `inet_aton`
+            // reads a bare `0x` as zero, so that host is 127.0.0.1 to the system
+            // resolver: measured with getaddrinfo(AI_NUMERICHOST), which parses it as an
+            // IP literal. `0x.0x.0x.0x` was allowed the same way and is 0.0.0.0.
+            let isHex = lower.hasPrefix("0x")
                 && lower.dropFirst(2).allSatisfy { $0.isASCII && $0.isHexDigit }
             if !(isDecimal || isHex) { return false }
         }
@@ -437,6 +509,31 @@ public enum URLGuard {
             let v4 = (Int(bytes[12]), Int(bytes[13]), Int(bytes[14]), Int(bytes[15]))
             if let reason = privateIPv4Reason(v4) {
                 return "\(reason) (embedded in IPv6)"
+            }
+            // RFC 8215's local-use range is a /48, and RFC 6052 puts the embedded IPv4 in
+            // a DIFFERENT place for every prefix length: at /96 it is the trailing four
+            // bytes, at /48 it is bytes 6 and 7 then 9 and 10, skipping the u-octet at
+            // byte 8. Only the /96 position was ever read, so an attacker parks a public
+            // decoy in the tail and the real target where the standard actually puts it:
+            // `64:ff9b:1:7f00:0:1:808:808` was ALLOWED while carrying 127.0.0.0.
+            //
+            // Both positions are now checked and either one denies, because a translator
+            // configured with a /48 and one configured with a /96 inside it are both
+            // legal and nothing in the address says which is in use. Failing closed on
+            // the union costs a public IPv6 that happens to collide, which is a far
+            // cheaper mistake than the one this replaces.
+            if nat64LocalUse {
+                let v4At48 = (Int(bytes[6]), Int(bytes[7]), Int(bytes[9]), Int(bytes[10]))
+                // An all-zero slot means this is the /96 form with an empty /48 field, not
+                // a /48 embedding of 0.0.0.0. Without this the union denied
+                // `64:ff9b:1::0808:0808`, a public address wrapped in the local-use
+                // prefix, because the empty slot reads as the unspecified address. An
+                // existing test caught it, which is the entire argument for keeping tests
+                // that assert what must STAY allowed next to the ones that assert denial.
+                let slotIsEmpty = bytes[6] == 0 && bytes[7] == 0 && bytes[9] == 0 && bytes[10] == 0
+                if !slotIsEmpty, let reason = privateIPv4Reason(v4At48) {
+                    return "\(reason) (embedded in NAT64 /48)"
+                }
             }
             return nil // embedded public IPv4
         }

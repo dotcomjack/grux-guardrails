@@ -44,6 +44,79 @@ What was wrong was the part that tells you an attack happened.
   because a bare IPv6 entry has many and truncating at the last one would silently turn it
   into a different, possibly public, address. There is a test for that specific mistake.
 
+A second pass, run as a six-lens adversarial sweep with three skeptics voting on every
+finding, then re-verified by hand at file and line. It found four reachable bypasses the
+first pass missed.
+
+- **`http://127.0.0x.1/` was allowed.** The hex-label check required more than two
+  characters, so a bare `0x` was neither decimal nor hex, the whole host was judged
+  non-numeric and fell through. `inet_aton` reads a bare `0x` as zero, so that host is
+  loopback: confirmed with `getaddrinfo(AI_NUMERICHOST)`, which parses it as an IP literal.
+  `0x.0x.0x.0x` was allowed the same way and is `0.0.0.0`.
+
+- **`http://127.0.0.1.nip.io/` was allowed.** Wildcard resolvers answer
+  `<anything>.10.0.0.1.nip.io` with that address, which turns any private target into an
+  ordinary public-looking domain. The metadata table already carried
+  `169.254.169.254.nip.io`, so the technique was known and exactly one instance of it was
+  blocked while the general shape was not. The embedded ADDRESS is judged now, in both the
+  dotted and dashed spellings, rather than the service, because blocking a list of these
+  costs the attacker one domain registration to defeat.
+
+- **NAT64 local-use `/48` read the wrong bytes.** RFC 6052 puts the embedded IPv4 in a
+  different place for every prefix length, and only the `/96` position was ever read, so
+  `64:ff9b:1:7f00:0:1:808:808` carried loopback where the standard puts it for a `/48`
+  and a public decoy where the code was looking. Both positions are checked now. An
+  existing test caught the first version of this fix denying a legitimately public
+  address, which is the argument for keeping must-stay-allowed assertions beside the
+  must-be-denied ones.
+
+- **`http://evil.com../` walked past the denylist.** `evaluate` stripped one trailing dot
+  while `canonicalEntry` stripped all of them, so the two never compared equal. The same
+  class as the single trailing dot the strip was written to fix, reintroduced by fixing
+  only one side of a comparison.
+
+- **The attacker chose the audit label.** `tag` scanned the denial reason for substrings,
+  and the bad-scheme reason interpolates the attacker's own scheme into itself, so
+  `denylist://x` reported as `USER_DENYLIST` and `credential://x` as `CREDENTIAL_URL`.
+  Anyone counting denial classes was reading numbers hostile input could move. Fixed
+  reasons now match exactly and the scheme reason matches on its prefix. `unparseable URL`
+  was landing on `PRIVATE_NETWORK` for the same reason, inflating the one tag the README
+  tells you to alert on.
+
+- **An indented PEM leaked its body verbatim.** The whole-block pattern is line-anchored
+  and had no tolerance for leading whitespace, so a key inside YAML, JSON, a markdown
+  block or a code sample matched its header and stopped. The body then depended entirely
+  on the entropy pass, which needs mixed case AND a digit, so a single-case base64 line
+  walked out underneath a header that had been helpfully replaced with `[REDACTED:PEM]`.
+  The unindented form was consumed whole, which is exactly what made it look covered.
+  This is the third instance of one defect: the comment on the JSON-escaped variant
+  describes the same thing happening with escaped newlines.
+
+- **The fence neutralised one tag, in one case.** The body could open a SECOND block with
+  an attacker-chosen `kind`, so a page could print
+  `<untrusted_data kind="operator_policy">` and invite the model to read what follows as a
+  more trusted class. This does not escape the fence, the real closer still carries the
+  real id, so the original framing of it as an escape was wrong. `</UNTRUSTED_DATA>` also
+  passed through untouched, and a model reading a transcript does not owe you case
+  sensitivity when every markup language it has seen treats tags as case-insensitive.
+  Both tags are neutralised now, case insensitively.
+
+**Two findings did not reproduce and were not acted on.** An alleged idempotence failure,
+`redact(redact(x)) != redact(x)`, held on all seven shapes probed including the new tags.
+An alleged verbatim leak from an indented PEM was real only in the sharper form above: the
+reported version was rescued by the entropy pass, and it took a deliberately single-case
+body to make it leak.
+
+**A test in the suite was measured as vacuous, and it was one written last round.**
+Neutering `isWhitespaceSeparable`, the brake that got its own CHANGELOG paragraph in round
+six, left all 82 tests green. Every benign line written to justify it was actually being
+saved by the locator brake beside it, because each happened to contain a URL, a path or a
+filename. Four corpus lines now exist that only that brake can save.
+
+Real-corpus precision is unchanged by this round: 41 of 9,062 lines, and the identical
+number with the previous redactor on the identical corpus, so the shift from the 0.396%
+quoted above is the corpus growing with new prose rather than a regression.
+
 ### Sixth audit, the redactor scanner
 
 A sixth audit. Round five replaced the label regex with a scanner and closed six leak

@@ -479,6 +479,88 @@ extension URLGuardTests {
         XCTAssertEqual(reachable, Set(emitted), "tag table and reachable tags disagree")
     }
 
+    /// A bare `0x` label with no digits after it. The hex check required more than two
+    /// characters, so `0x` was neither decimal nor hex, the whole host was judged
+    /// non-numeric and fell through to ALLOWED. `inet_aton` reads a bare `0x` as zero,
+    /// which was confirmed with getaddrinfo(AI_NUMERICHOST): the OS parses `127.0.0x.1`
+    /// as an IP literal, so this reached loopback.
+    func testBareHexLabelIsNotAnEscapeHatch() {
+        for h in ["http://127.0.0x.1/", "http://0x.0x.0x.0x/", "http://0x.1/",
+                  "http://127.0x0.0x0.1/"] {
+            XCTAssertFalse(URLGuard.evaluate(h).isAllowed, "reachable: \(h)")
+        }
+        // A real domain whose label merely begins with those characters is not an IP.
+        XCTAssertTrue(URLGuard.evaluate("https://0xdeadbeef.example.com/").isAllowed)
+        XCTAssertTrue(URLGuard.evaluate("https://0x.io/").isAllowed)
+    }
+
+    /// Wildcard resolvers answer `<anything>.10.0.0.1.nip.io` with 10.0.0.1, which turns
+    /// any private address into an ordinary public-looking domain. The metadata table
+    /// already carried `169.254.169.254.nip.io`, so the technique was known and exactly
+    /// one instance of it was blocked while the general shape was not.
+    func testHostnamesEmbeddingAPrivateAddressAreDenied() {
+        for h in ["http://127.0.0.1.nip.io/", "http://10.0.0.1.sslip.io/",
+                  "http://192.168.1.1.xip.io/", "http://169.254.169.254.sslip.io/",
+                  "http://foo.127.0.0.1.nip.io/", "http://10-0-0-1.nip.io/",
+                  "http://127-0-0-1.nip.io/", "http://127.0.0.1.example.com/"] {
+            XCTAssertFalse(URLGuard.evaluate(h).isAllowed, "reachable: \(h)")
+            XCTAssertEqual(URLGuard.evaluate(h).tag, "PRIVATE_NETWORK", "wrong tag: \(h)")
+        }
+        // A PUBLIC address in the labels is not a private-network hit, and ordinary
+        // hostnames that merely contain numbers must not be swept up. Over-denying here
+        // would be paid on every version-numbered and dated subdomain in existence.
+        for h in ["https://8.8.8.8.nip.io/", "https://1.2.3.4.example.com/",
+                  "https://v1.2.3.4.example.com/", "https://2026.08.09.example.com/",
+                  "https://a1-b2-c3-d4.example.com/", "https://192.0.example.com/"] {
+            XCTAssertTrue(URLGuard.evaluate(h).isAllowed, "wrongly denied: \(h)")
+        }
+    }
+
+    /// RFC 6052 puts the embedded IPv4 in a different place for every prefix length. Only
+    /// the /96 position was read, so a public decoy in the tail hid the real target where
+    /// the standard actually puts it for a /48.
+    func testNAT64LocalUsePrefixDecodesTheRFC6052SlotForIts48() {
+        XCTAssertFalse(URLGuard.evaluate("http://[64:ff9b:1:7f00:0:1:808:808]/").isAllowed,
+                       "loopback at the /48 slot reached, with a public decoy in the tail")
+        XCTAssertFalse(URLGuard.evaluate("http://[64:ff9b:1:0a00:0:1:808:808]/").isAllowed)
+        // The /96 form with an empty /48 slot is not a /48 embedding of 0.0.0.0, and a
+        // public address wrapped in the local-use prefix must stay allowed.
+        XCTAssertTrue(URLGuard.evaluate("http://[64:ff9b:1::0808:0808]/").isAllowed)
+    }
+
+    /// The attacker picked the audit label. `evaluate` interpolates the scheme into its
+    /// own denial reason, and `tag` scanned that reason for substrings, so a URL with the
+    /// scheme `denylist:` reported as USER_DENYLIST and `credential:` as CREDENTIAL_URL.
+    /// Anyone counting denial classes was reading numbers hostile input could move.
+    func testAttackerChosenSchemeCannotSteerTheAuditTag() {
+        for scheme in ["denylist", "credential", "loopback", "metadata", "private",
+                       "multicast", "intranet", "unparseable"] {
+            XCTAssertEqual(URLGuard.evaluate("\(scheme)://x/").tag, "BAD_SCHEME",
+                           "scheme \(scheme) steered the tag")
+        }
+    }
+
+    /// `unparseable URL` contains `unparseable`, a needle added for the IPv6 literal case,
+    /// so an ordinary malformed URL reported as PRIVATE_NETWORK and inflated the count of
+    /// the one tag the README tells you to alert on.
+    func testMalformedURLsAreNotReportedAsPrivateNetworkHits() {
+        for u in ["http://[not-an-ipv6/", "ht tp://x", "http://%%%/"] {
+            XCTAssertEqual(URLGuard.evaluate(u).tag, "URL_DENIED", "wrong tag for \(u)")
+        }
+    }
+
+    /// `evaluate` stripped ONE trailing dot while `canonicalEntry` stripped all of them,
+    /// and the two never compared equal, so a second dot walked past the denylist. Same
+    /// class as the single trailing dot the strip was written to fix, reintroduced by
+    /// fixing only one side of the comparison.
+    func testRepeatedTrailingDotsCannotBypassTheDenylist() {
+        let cfg = URLGuardConfig(denylist: ["evil.com"])
+        for u in ["http://evil.com/", "http://evil.com./", "http://evil.com../",
+                  "http://evil.com.../", "http://sub.evil.com../"] {
+            XCTAssertFalse(URLGuard.evaluate(u, config: cfg).isAllowed, "bypassed: \(u)")
+        }
+    }
+
     /// An unbracketed IPv6 entry has many colons and no port. Stripping at the last one
     /// would truncate the address into a different, possibly public, one.
     func testIPv6DenylistEntriesAreNotTruncatedByThePortStripper() {
