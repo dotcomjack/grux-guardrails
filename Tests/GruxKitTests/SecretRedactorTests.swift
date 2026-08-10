@@ -302,6 +302,46 @@ final class SecretRedactorTests: XCTestCase {
                        "a leading slash spared a secret the same token without it loses")
     }
 
+    /// The price of the rule above, pinned rather than left to be discovered.
+    ///
+    /// Requiring three segments means a SINGLE-component absolute path, 40 characters or
+    /// more, carrying mixed case and a digit, is now redacted. Both examples below are
+    /// synthetic: none of the 814 real paths and URLs taken off a working machine has this
+    /// shape, and the real single-component entries under `/` are short (`/Applications`,
+    /// `/Library`, `/System`, `/Users`, `/Volumes`).
+    ///
+    /// It is pinned as an assertion rather than described in a comment so that anyone who
+    /// finds a genuine path of this shape gets a failing test naming the trade, instead of
+    /// a silent mangle. If that day comes, the fix is a word-shape test on the single
+    /// component, not loosening the segment count, which is what was leaking.
+    ///
+    /// The two directions are not equal, which is why this trade goes this way. A leak
+    /// hands a live credential to a model. A mangle costs a reader one path.
+    func testTheKnownPriceOfTheLeadingSlashRule() {
+        let mangled = [
+            "/ThisIsAVeryLongSingleDirectoryName2026x",
+            "/ApplicationsXcode15ProductionBuild2026a",
+        ]
+        for path in mangled {
+            XCTAssertEqual(SecretRedactor.redact(path), "[REDACTED:HIGH_ENTROPY]",
+                           "the documented cost changed shape: \(path)")
+        }
+        // The neighbours that must NOT be caught up in it, all real shapes.
+        let safe = [
+            "/Volumes/BackupDrive2026ExternalArchive1",
+            "/home_directory_backup_2026_08_10_final1",
+            "/mnt/VeryLongVolumeLabelForTheNAS2026Arch",
+            "/Users/dotcomjackVeryLongSuffixHere2026x",
+            "/opt/HomebrewCellarPostgreSQL16Beta2026",
+            "/tmp/ScreenRecording2026-08-10at11.24.31",
+            "/Library/CoreServices2026SystemUIServer1",
+            "/private/var/folders/ab/T/CoreSimulator1",
+        ]
+        for path in safe {
+            XCTAssertEqual(SecretRedactor.redact(path), path, "mangled a real path: \(path)")
+        }
+    }
+
     /// Round 8, and the fixtures above are exactly why this one had to be written
     /// separately. Every path there is saved by a SHAPE rule, and each was chosen, without
     /// anyone meaning to, so that a shape rule would save it. `github.com/a/b/blob/...`
