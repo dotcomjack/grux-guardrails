@@ -213,11 +213,29 @@ lvh.me                  resolves to loopback with NO address in the name, so it 
 evil.com.               trailing-dot FQDN, resolves identically, different string
 evil.com..              and the same trick with a second dot, which is a different
                         string again and has to reduce to the same entry
+[2001:1::1]             PCP anycast, absorbed by the nearest responder, which is your
+                        own NAT or firewall. Reads as ordinary global unicast.
+[2001:1::2]             the same shape for TURN, [2001:1::3] for DNS-SD SRP
+[2001:0:0:1::1]         Teredo, which carries the tunnel server's IPv4 in the clear and
+                        the client's IPv4 bitwise-inverted in the trailing bytes
 ```
 
 Every line above is a test case. The trailing dot one matters more than it looks: it has
 to be normalized *before* list matching, not after, or one appended character walks past
 your denylist.
+
+Both IANA special-purpose registries are now covered row by row, IPv4 and IPv6. The IPv6
+table used to classify 8 of its 25 rows, which was an absence rather than a decision. The
+three anycast addresses above were the genuine holes in it; the rest were unroutable
+identifiers, documentation ranges and discard blocks, where denying costs nothing.
+
+Denying by prefix is where this gets dangerous, and the tests carry both directions for
+that reason. `2001::/23` would close five of those rows in one line and would also deny
+AMT at `2001:3::/32` and AS112-v6 at `2001:4:112::/48`, which are globally reachable
+services carrying real traffic. `3fff::/20` is a second instance: it fixes the first 20
+bits, so the documentation block runs `3fff:0000::` to `3fff:0fff::` and `3ffe::` is
+ordinary public space. Every deny assertion sits next to the allow assertions for its
+neighbours.
 
 `evaluate` is pure and synchronous, which is what makes the policy table-testable. Wire
 your own auditing around it.
