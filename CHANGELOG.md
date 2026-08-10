@@ -42,8 +42,9 @@ and 200 characters, generated from a fixed seed and run through the redactor wit
 without the rule, so the difference is the exact set of secrets newly spared rather than a
 sampling estimate. That distinction mattered: a first pass at N=20,000 with an unseeded
 generator appeared to show a regression at 128 characters that a seeded rerun showed was
-noise. **Cost: roughly 20 out of 400,000, three seeds giving 12, 19 and 22, every one
-carrying three or more slashes. Benefit: real
+noise. **Cost: 24.0 per 400,000, measured over ten seeds and 4,000,000 trials as 240 newly
+spared against zero newly caught, individual seeds ranging 15 to 31, every one carrying
+three or more slashes. Benefit: real
 path mangling fell from 357 of 814 to 2, and the project's own corpus from 41 of 9,323 to
 40.** No secret that was caught before is missed now.
 
@@ -250,6 +251,27 @@ under one seed:
 A third of the leak closed at no precision cost at all. Two plants bracket the threshold
 from both sides: reverting to `leadingEmpty` alone leaks the secret again, and tightening to
 seven segments breaks a real path fixture. Fifteen plants across the round.
+
+### Correction: three bugs in the notes above never shipped in any tag
+
+A pre-public audit checked this changelog's narrative against a real 0.4.0 build rather than
+against the commit messages, and found that three defects described in the sections above
+were introduced AND fixed entirely inside the unreleased window. A consumer pinned to 0.4.0
+was never exposed to them:
+
+- The quadratic denial of service. Measured directly on 0.4.0 with the exact shape that took
+  11 seconds mid-window: 0.007 seconds. The scanner that carried the defect did not exist yet.
+- `curl -u` swallowing the following URL. 0.4.0 does not mangle it, because the basic-auth
+  pass did not exist yet. It also does not redact the password, which is on the leak list.
+- "Most specific wins" downgrading a Stripe key inside a `postgres://` URL. At 0.4.0 the
+  URL-credential pass that caused the downgrade did not exist, so the Stripe pattern tagged
+  it correctly on its own.
+
+The sections above are accurate about the code at the time each was written. They read, if
+you come to them cold, as though every defect listed is something a released version
+exposes, and for these three that is wrong. The released-version story is simpler and worse:
+0.4.0 leaks badly, for the reasons now listed in README.md, and none of these three is among
+them.
 
 ### Seventh audit, URLGuard and the audit surface
 
