@@ -450,6 +450,46 @@ final class SecretRedactorTests: XCTestCase {
               + "\(String(format: "%.3f", rate * 100))% (\(leaked)/\(trials))")
     }
 
+    /// Every Package.swift the README prints must be a file you can actually paste.
+    ///
+    /// The install block was labelled "the whole manifest" and was not: it opened at
+    /// `let package = Package(` with no `// swift-tools-version:` pragma and no
+    /// `import PackageDescription`. Pasted literally into an empty file it fails with
+    /// "package is using Swift tools version 3.1.0 which is no longer supported", which
+    /// tells a reader nothing about what is wrong and sends them looking in the wrong place.
+    ///
+    /// The install instructions were also, separately, wrong in a way that stopped a
+    /// consumer building at all: they never said the reader's own manifest needs
+    /// `platforms: [.macOS(.v13)]`. Two defects in one section that nobody hit because
+    /// every test in this repo builds the LIBRARY, and none of them had ever been a
+    /// consumer of it. This test is the cheap standing version of that check.
+    ///
+    /// Reads the real file, like the pattern-count and tag-table tests, because a copy
+    /// drifts and a mirror test that mirrors nothing is decoration.
+    func testEveryManifestInTheReadmeIsPasteable() throws {
+        let readme = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("README.md"),
+            encoding: .utf8)
+        // Any fenced swift block that declares a Package is a manifest a reader may paste.
+        let blocks = readme.components(separatedBy: "```swift")
+            .dropFirst()
+            .compactMap { $0.components(separatedBy: "```").first }
+            .filter { $0.contains("let package = Package(") }
+        XCTAssertFalse(blocks.isEmpty, "no manifest block found, this test has stopped testing")
+        for block in blocks {
+            XCTAssertTrue(block.contains("// swift-tools-version:"),
+                          "a manifest block has no tools-version pragma, so pasting it fails "
+                          + "with a Swift 3.1.0 error that names nothing real:\n\(block)")
+            XCTAssertTrue(block.contains("import PackageDescription"),
+                          "a manifest block never imports PackageDescription:\n\(block)")
+            XCTAssertTrue(block.contains("platforms:"),
+                          "a manifest block omits platforms, which is the exact thing that "
+                          + "stopped a consumer building:\n\(block)")
+        }
+    }
+
     /// Regression. The 32-character floor caught ordinary long identifiers. 40 is the
     /// length of the shortest credential the generic pass is responsible for, so nothing
     /// is lost by raising it back.

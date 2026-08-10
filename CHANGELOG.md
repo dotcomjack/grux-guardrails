@@ -273,6 +273,38 @@ exposes, and for these three that is wrong. The released-version story is simple
 0.4.0 leaks badly, for the reasons now listed in README.md, and none of these three is among
 them.
 
+### Eighth audit, part six, the fix for the install instructions was itself unpasteable
+
+A document review of the README as shipped, rather than as a diff, found two defects in the
+section written one commit earlier to fix the install instructions.
+
+- **The block labelled "the whole manifest" was not a whole file.** It opened at
+  `let package = Package(` with no `// swift-tools-version:` pragma and no
+  `import PackageDescription`. Pasted literally into an empty file it fails with "package is
+  using Swift tools version 3.1.0 which is no longer supported", an error that names nothing
+  the reader did and sends them looking in the wrong place. Verified by pasting it.
+
+  Worth noticing what happened here. The previous commit fixed an install section that did
+  not build, and the fix it shipped also did not build, for a different reason. Both defects
+  have the same cause: every test in this repo builds the LIBRARY, and until this round none
+  of them had ever been a CONSUMER of it.
+
+- **A paragraph was duplicated**, an append that never replaced the passage it was rewriting.
+  The stale copy still read "the lowest of the three" three lines below the corrected text
+  saying ten seeds and a range of 15 to 31, so the section contradicted itself about its own
+  headline number, and the duplicate had been glued onto the end of an unrelated paragraph.
+
+`testEveryManifestInTheReadmeIsPasteable` now reads the real README, finds every fenced
+Swift block that declares a `Package`, and fails the build if one lacks the pragma, the
+import, or the `platforms` line that was the original defect. Same shape as the pattern-count
+and tag-table tests, and planted, it fails. Sixteen plants across the round.
+
+Everything else in the README verified against code or a real build: the 0.4.0 claim list in
+full and nothing in it overstated, the `branch: "main"` dependency resolving to this exact
+commit, all five URLGuardConfig claims, and the fence determinism claim, where the label
+`screen_ocr` really does derive `f942782c85ee7d92` every time, which is the value the source
+comment names.
+
 ### Seventh audit, URLGuard and the audit surface
 
 This one covers `URLGuard`, the fence and the test suite, none of which round six
