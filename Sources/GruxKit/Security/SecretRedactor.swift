@@ -701,7 +701,8 @@ public enum SecretRedactor {
 
     private static func looksLikeASecret(_ s: String) -> Bool {
         var upper = false, lower = false, digit = false, base64Padding = false
-        var mixedAlphabet = false
+        var sawPlus = false
+        var sawURLSafe = false
         var runLength = 0
         var sawSlash = false
         var segment = 0
@@ -731,10 +732,17 @@ public enum SecretRedactor {
                 lower = true; segment += 1
                 if isVowel(scalar.value) { segmentHasVowel = true }
             case 0x30...0x39: digit = true; segment += 1; segmentIsNamelike = false
-            case 0x2B, 0x3D:                                      // + and =, the base64 tell
+            // `+` and `=` are tracked SEPARATELY and the difference is a leak. `+` belongs
+            // to standard base64 only. `=` is padding and is shared by BOTH alphabets, so
+            // it says nothing about which one is in use and cannot take part in the
+            // mixed-alphabet test below.
+            case 0x2B:                                            // +, standard base64 only
+                base64Padding = true; sawPlus = true
+                segment += 1; segmentIsNamelike = false
+            case 0x3D:                                            // =, padding, either one
                 base64Padding = true; segment += 1; segmentIsNamelike = false
-            case 0x2D, 0x5F:                                      // - and _
-                mixedAlphabet = true; segment += 1
+            case 0x2D, 0x5F:                                      // - and _, base64url only
+                sawURLSafe = true; segment += 1
             case 0x2F:                                            // the path separator
                 sawSlash = true
                 if isFirstSegment && segment == 0 { leadingEmpty = true }
@@ -742,7 +750,7 @@ public enum SecretRedactor {
                 isFirstSegment = false
                 closeSegment()
                 segment = 0
-            default: segment += 1                                 // - and _ carry no signal
+            default: segment += 1
             }
             runLength += 1
         }
@@ -753,18 +761,31 @@ public enum SecretRedactor {
         // after, which meant a blob carrying `+` and `==` could still be thrown away as a
         // path because of one unlucky short run between slashes.
         //
-        // `mixedAlphabet` is the brake, and it is there because this shortcut returns true
-        // before ANY other rule gets a say, so anything it gets wrong is unrecoverable.
-        // A `+` is the base64 tell only in a base64 alphabet. Standard base64 is
-        // `A-Za-z0-9+/`; base64url is `A-Za-z0-9-_`. Neither contains both, so a run
-        // carrying a `+` AND a `-` or `_` is not base64 in either spelling.
-        //
-        // Without that brake, a plus-addressed email address was destroyed the moment its
-        // local part reached 40 characters:
+        // The brake exists because this shortcut returns true before ANY other rule gets a
+        // say, so anything it gets wrong is unrecoverable. Without it, a plus-addressed
+        // email address was destroyed the moment its local part reached 40 characters:
         // `support+order-confirmation-and-shipping-updates@motorcityorganics.com` came out
         // as `[REDACTED:HIGH_ENTROPY]@motorcityorganics.com`. All lowercase, no digit, and
-        // no rule downstream could object because this line had already returned.
-        if base64Padding && !mixedAlphabet && runLength >= 40 { return true }
+        // nothing downstream could object because this line had already returned.
+        //
+        // The brake is `+` TOGETHER WITH `-` or `_`, and the precision matters more than it
+        // looks. Standard base64 is `A-Za-z0-9+/` and base64url is `A-Za-z0-9-_`, so no
+        // real token carries a `+` alongside a `-` or `_`. **But `=` is padding and belongs
+        // to BOTH alphabets**, so it says nothing about which is in use.
+        //
+        // The first version of this brake missed that and tested `+` or `=` against `-` or
+        // `_`, which spared raw `base64.urlsafe_b64encode()` output with its padding left
+        // on: `aojyTcDoAfFSVWztzGhCANprePvlznHDQqs-oTX-PQ==` went from redacted to fully
+        // in the clear. That is the ordinary shape of a password-reset token, an email
+        // verification token or a signed cookie, it carries no `/` so no path rule applies
+        // either, and with no digit it fell through the final test as well. A fix for a
+        // cosmetic mangle had opened a real leak, which is the wrong side of this trade in
+        // every case.
+        //
+        // What is still deliberately traded away: a plus-addressed local part of 40 or more
+        // characters containing NO hyphen and NO underscore is still redacted. That case
+        // annoys, and the one above harms.
+        if base64Padding && !(sawPlus && sawURLSafe) && runLength >= 40 { return true }
 
         // Path rejection, on TWO weak signals rather than one.
         //
@@ -784,7 +805,18 @@ public enum SecretRedactor {
         // slash leaves long segments either side. Without this, a bare 40-character key
         // with no label was discarded as a path about 1.7% of the time, and a bare key is
         // the case with no other signal to fall back on.
-        if sawSlash && leadingEmpty { return false }
+        // The leading separator alone is not enough, and the gap it left was the single
+        // largest term in this file's published leak rate. `leadingEmpty` fires on ANY
+        // token beginning with `/`, and a random base64 secret begins with `/` about one
+        // time in 64, which is 1.56% and almost exactly the ~1.3% bare-token leak rate
+        // that was being reported as a general weakness of the entropy rule. It was not
+        // general at all: `/JalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY12` walked out in the
+        // clear while the same forty characters without the slash were redacted.
+        //
+        // A real absolute path of forty characters or more has more than one component.
+        // Requiring three segments, meaning the empty leading one plus two more, keeps
+        // every path fixture and takes the accidental leading slash away from a blob.
+        if sawSlash && leadingEmpty && segmentCount >= 3 { return false }
         if sawSlash && shortSegments >= 2 && meanSegmentLength(of: s) < 10 { return false }
 
         // The name signal, and the one that generalises. Both rules above are shape rules,
@@ -815,9 +847,15 @@ public enum SecretRedactor {
         // Price, measured causally rather than estimated. 100,000 random base64 strings at
         // each of 40, 64, 128 and 200 characters, generated from a fixed seed and run
         // through the redactor with and without this rule, so the difference is the exact
-        // set of secrets newly spared and not a sampling artefact. Twelve out of 400,000,
-        // every one carrying three or more slashes, against 355 of 814 real paths that
-        // stopped being destroyed. Without the vowel test the same measurement cost 31.
+        // set of secrets newly spared and not a sampling artefact. Roughly 20 out of
+        // 400,000, every one carrying three or more slashes, against 355 of 814 real paths
+        // that stopped being destroyed. Without the vowel test the cost roughly triples.
+        //
+        // "Roughly" is doing real work there and the first version of this comment did not
+        // have it. Three independent seeds give 12, 19 and 22, and the 12 was published
+        // alone as though the seed made it exact. A fixed seed makes the COMPARISON exact,
+        // because both sides see identical inputs, and says nothing about how much the
+        // sample itself moves.
         if segmentCount >= 4 && namelikeSegments >= 3 && namelikeSegments * 2 >= segmentCount { return false }
 
         return upper && lower && digit && runLength >= 32

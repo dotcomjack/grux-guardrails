@@ -42,7 +42,8 @@ and 200 characters, generated from a fixed seed and run through the redactor wit
 without the rule, so the difference is the exact set of secrets newly spared rather than a
 sampling estimate. That distinction mattered: a first pass at N=20,000 with an unseeded
 generator appeared to show a regression at 128 characters that a seeded rerun showed was
-noise. **Cost: 12 out of 400,000, every one carrying three or more slashes. Benefit: real
+noise. **Cost: roughly 20 out of 400,000, three seeds giving 12, 19 and 22, every one
+carrying three or more slashes. Benefit: real
 path mangling fell from 357 of 814 to 2, and the project's own corpus from 41 of 9,323 to
 40.** No secret that was caught before is missed now.
 
@@ -178,6 +179,72 @@ well as its verdict.
 Three more plants: deleting the table fails 20 assertions, the naive `2001::/23` blanket
 fails on AMT and AS112-v6, and the wrong `/20` mask fails on `3ffe::`. Twelve across the
 round.
+
+### Eighth audit, part four, the review found a leak I had just introduced
+
+An independent review of the whole aggregate diff, by an agent that wrote none of it, found
+two real defects and cleared four categories. Both defects were mine, from earlier in this
+same round.
+
+- **The base64 brake I added to fix the plus-addressed email spared a whole class of real
+  token.** `aojyTcDoAfFSVWztzGhCANprePvlznHDQqs-oTX-PQ==` went from `[REDACTED:HIGH_ENTROPY]`
+  to fully in the clear. That is raw `base64.urlsafe_b64encode()` output with its padding
+  left on, which is the ordinary shape of a password-reset token, an email-verification
+  token or a signed cookie.
+
+  The error was one character wide. Standard base64 is `A-Za-z0-9+/` and base64url is
+  `A-Za-z0-9-_`, so a `+` alongside a `-` or `_` really is impossible, and that is what the
+  README said. The CODE tested `+` **or** `=`, and `=` is padding shared by both alphabets,
+  so it says nothing about which is in use. A base64url token with its padding retained
+  tripped a brake meant for something else, carried no `/` so no path rule could rescue it,
+  and if it also carried no digit the final test let it go too.
+
+  Worth recording precisely because the prose was right and the code was wrong. Checking
+  the code against its own documentation would have caught this; checking the documentation
+  against the code, which is the usual direction, would not have.
+
+  The test that was supposed to cover this could not: every fixture in
+  `testRealBase64WithPaddingIsStillCaught` used `+` and `==` with no `-` or `_` anywhere, so
+  the brake was never evaluated. Five base64url fixtures were added and, planted, they fail.
+
+- **A measured number was published as though it were exact.** "12 out of 400,000" appeared
+  in README.md, CHANGELOG.md and the source comment. The reviewer reproduced the stated
+  methodology and got 22. A third seed gives 19. All three are honest samples; the mistake
+  was mine, in reading a fixed seed as removing sampling error. A seed makes the COMPARISON
+  exact, because both sides see identical inputs, and does nothing about the variance of the
+  sample. The figure now reads as a range in all three places.
+
+- A stale comment claiming `-` and `_` "carry no signal" survived three lines below the case
+  that gives them one. Removed.
+
+Four categories came back clean and are worth naming, since a clean category is a result:
+the marker-preserving replacement's cursor arithmetic, including idempotence across twenty
+consecutive matches in one string; every bit mask in the new IPv6 table, swept across 46
+boundary addresses; the Grux config ladder; and the rest of the README and CHANGELOG claims.
+
+### Eighth audit, part five, the leading slash was most of the published leak rate
+
+Chasing the reviewer's note on the previous item turned up something larger. This file has
+published a bare 40-character leak rate of "about 1.2 to 1.3%" for several rounds, and it
+was being read as a general weakness of the entropy rule. It was not. It was one hole.
+
+`leadingEmpty` fired on ANY token beginning with `/`. A random base64 secret begins with `/`
+one time in 64, which is 1.56%. That is very nearly the whole published figure, and the
+resemblance was not a coincidence.
+`/JalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY12` walked out in the clear while the identical forty
+characters without the leading slash were redacted.
+
+A real absolute path of forty characters or more has more than one component, so the rule
+now wants three segments, the empty leading one plus two more. Measured on identical inputs
+under one seed:
+
+  bare 40-char leak rate   1.295%  ->  0.875%
+  real paths mangled        2/814  ->   2/814
+  project corpus          40/9,323 -> 40/9,323
+
+A third of the leak closed at no precision cost at all. Two plants bracket the threshold
+from both sides: reverting to `leadingEmpty` alone leaks the secret again, and tightening to
+seven segments breaks a real path fixture. Fifteen plants across the round.
 
 ### Seventh audit, URLGuard and the audit surface
 

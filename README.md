@@ -83,6 +83,19 @@ before deciding. Both halves of that sentence are load-bearing. "Considers" rath
 not base64 in either spelling. Without that qualifier a plus-addressed email address was
 destroyed the moment its local part reached 40 characters.
 
+**`=` is not part of that test, and getting it wrong was a leak.** Padding belongs to both
+alphabets, so it says nothing about which is in use. Only `+` is exclusive to standard
+base64 and only `-` and `_` are exclusive to base64url. An implementation that tested
+`+` **or** `=` against `-` or `_` spared raw `base64.urlsafe_b64encode()` output with its
+padding left on, which is the ordinary shape of a password-reset token, an
+email-verification token or a signed cookie. Those carry no `/`, so no path rule applies
+either, and one without a digit walked out completely in the clear. The sentence above was
+already written correctly when the code was not, which is the argument for checking code
+against its own documentation rather than the other way round.
+
+What stays traded away: a plus-addressed local part of 40 or more characters containing no
+hyphen and no underscore is still redacted. That case annoys. The other one harms.
+
 That rule exists because **a redactor that mangles ordinary
 text is a redactor people switch off**, and a switched-off redactor protects nothing.
 Mixed case with digits is what separates a random token from prose, an identifier, or a
@@ -111,8 +124,25 @@ permalink with a real owner and repository name. All three together leave 2.
 
 The cost is published rather than implied. Against 100,000 random base64 strings at each
 of 40, 64, 128 and 200 characters, generated from a fixed seed so the comparison is causal,
-the name signal newly spares 12 secrets out of 400,000, every one of them carrying three or
-more slashes. Absolute paths, GitHub permalinks, DerivedData directories, ModuleCache
+the name signal newly spares roughly 20 secrets out of 400,000, every one of them carrying
+three or more slashes. That figure is a range, not a point: three independent seeds gave
+12, 19 and 22. An earlier version of this file published the 12 on its own, which was the
+lowest of the three and was stated as though a seeded run made it exact. Seeding removes
+sampling noise from a COMPARISON, because both sides see identical inputs, and it does
+nothing about the variance of the sample itself.
+
+**The first signal was also the largest hole in the published leak rate, which nobody had
+noticed because the number was being read as a general weakness.** An empty leading segment
+fires on ANY token beginning with `/`, and a random base64 secret begins with `/` about one
+time in 64, or 1.56%, against a reported bare-token leak rate of roughly 1.3%. The two were
+very nearly the same number and that was not a coincidence.
+`/JalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY12` walked out in the clear while the same forty
+characters without the slash were redacted. Requiring a real absolute path to have more
+than one component takes the 40-character rate from 1.295% to 0.875%, measured on identical
+inputs, and leaves the path corpus at 2 of 814 and the project corpus at 40 of 9,323
+exactly where they were.
+
+Absolute paths, GitHub permalinks, DerivedData directories, ModuleCache
 filenames, kebab-case identifiers, md5 sums and fifty consecutive digits all pass through
 untouched, and there are tests asserting each one, with the must-stay-redacted cases sitting
 in the same file so the trade cannot drift in one direction unnoticed.
