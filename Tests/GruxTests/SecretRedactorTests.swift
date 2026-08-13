@@ -929,4 +929,50 @@ extension SecretRedactorTests {
         let out = SecretRedactor.redact(json)
         XCTAssertFalse(out.contains("MIIEvQIBADANBgkq"), "key body survived JSON encoding: \(out)")
     }
+
+    /// Round 9. Base64 data URIs and subresource integrity hashes are destroyed, and that
+    /// is a real cost paid on purpose rather than an oversight.
+    ///
+    /// An agent that reads a screen or a page meets these constantly: inline images, inline
+    /// fonts, CSS `url(data:...)`, and `integrity="sha384-..."` on every CDN script tag.
+    /// Every one of them is a long high-entropy run in a base64 alphabet, which is exactly
+    /// the shape of a credential, and no rule here can tell them apart by shape.
+    ///
+    /// The obvious fix is to exempt whatever follows `;base64,`. Do not do it. That prefix
+    /// is attacker-controllable in any text an agent reads, so the exemption is a smuggling
+    /// gadget: `data:image/png;base64,sk_live_...` would walk a live Stripe key straight
+    /// through. Both of those are caught today, and the assertions at the bottom of this
+    /// test exist to keep them caught if anyone revisits this.
+    ///
+    /// So the cost is pinned rather than removed. If you feed an agent HTML, expect inline
+    /// assets to come back redacted.
+    func testTheKnownPriceOfBase64DataURIsAndIntegrityHashes() {
+        let mangledOnPurpose = [
+            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk",
+            "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmci",
+            "data:font/woff2;base64,d09GMgABAAAAAAoUAA4AAAAAFAAAAAAAAAAAAAAAAAAAAAAAA",
+            "integrity=\"sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy9rx7HNQlGYl1kPzQho1wx4JwY8wC\"",
+        ]
+        for text in mangledOnPurpose {
+            XCTAssertNotEqual(SecretRedactor.redact(text), text,
+                              "the documented cost changed shape: \(text)")
+        }
+
+        // Not uniform, and worth knowing before you rely on either behaviour: a JPEG data
+        // URI survives, because its body opens `/9j/` and the leading slashes put it inside
+        // the path exclusions. Same construct, opposite outcome, decided by the payload.
+        let jpeg = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD2wBDAAkGBwgHBhIPDxAPEBAQ"
+        XCTAssertEqual(SecretRedactor.redact(jpeg), jpeg,
+                       "the JPEG asymmetry changed, update the docs")
+
+        // The reason the exemption is not worth having. If these ever stop being redacted,
+        // the prefix has become a bypass.
+        for smuggled in [
+            "data:image/png;base64,sk_live_ABCDEFGHIJ0123456789abcdefghij",
+            "data:image/png;base64,AKIAIOSFODNN7EXAMPLE",
+        ] {
+            XCTAssertTrue(SecretRedactor.redact(smuggled).contains("[REDACTED"),
+                          "a data URI prefix is smuggling a credential: \(smuggled)")
+        }
+    }
 }
