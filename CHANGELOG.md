@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0, unreleased
+## 0.6.0, 2026-08-13
 
 **Breaking, and it is the only change: the module is renamed from `GruxKit` to `Grux`.**
 Every consumer's `import GruxKit` stops compiling and becomes `import Grux`. The package
