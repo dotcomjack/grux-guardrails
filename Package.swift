@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Grux",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "Grux", targets: ["Grux"])
     ],

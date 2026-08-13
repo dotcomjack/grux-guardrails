@@ -241,7 +241,7 @@ final class AdversarialRound2Tests: XCTestCase {
         }
     }
 
-    /// KNOWN GAP, and the only URL family in this round that is not denied.
+    /// FIXED IN 0.6.1. This was the only URL family in round 2 that was not denied.
     ///
     /// `::ffff:0:a.b.c.d` is the IPv4-translated address of RFC 2765 section 2.1, the
     /// `::ffff:0:0:0/96` prefix. It is the fourth member of the embedded-IPv4 family whose
@@ -258,13 +258,14 @@ final class AdversarialRound2Tests: XCTestCase {
     /// dropped this format, and IANA does not carry it as a special-purpose prefix, which
     /// is presumably why it was never in the table.
     ///
-    /// **Why it is filed at all.** This guard denies `0x7f.0.0.1` purely because a
+    /// It is now decoded beside the other three. The reasoning that got it fixed:
+    /// this guard denies `0x7f.0.0.1` purely because a
     /// resolver MIGHT read it as loopback, and it denies deprecated site-local fec0::/10
     /// with the note that deprecated is not the same as unroutable. By its own published
     /// standard, a deprecated translation format carrying a loopback target belongs in the
     /// table. The cost of adding it is a public IPv6 that happens to collide with a
     /// reserved prefix, which is the same trade the NAT64 rows already took.
-    func testKnownGapTheIPv4TranslatedIPv6PrefixIsNotClassified() {
+    func testIPv4TranslatedIPv6PrefixIsDenied() {
         let payloads = [
             "http://[::ffff:0:127.0.0.1]/",
             "http://[::ffff:0:169.254.169.254]/",
@@ -273,12 +274,10 @@ final class AdversarialRound2Tests: XCTestCase {
             "http://[0:0:0:0:ffff:0:7f00:1]/",
             "http://[::ffff:0:0:127.0.0.1]/",
         ]
-        XCTExpectFailure("KNOWN GAP: RFC 2765 IPv4-translated ::ffff:0:0:0/96 is not decoded. Not routable on macOS, so it is a hardening gap rather than a live SSRF. Fixing it means adding one row beside the NAT64 rows in ipv6Reason, and then deleting this expectation.") {
             for raw in payloads {
                 XCTAssertFalse(URLGuard.evaluate(raw).isAllowed,
                                "IPv4-translated IPv6 carrying a private target was allowed: \(raw)")
             }
-        }
     }
 
     // MARK: - URLGuard, family 7: extremely long hosts
@@ -456,17 +455,15 @@ final class AdversarialRound2Tests: XCTestCase {
     /// labelled form IS caught, so the library already agrees these values are
     /// credentials. It just cannot see them when they arrive bare, which is how a token
     /// appears in a `docker login` transcript or a CI log.
-    func testKnownDefectProviderPrefixesInvisibleToBothPassesSurvive() {
+    func testDockerHubAndLinearTokensAreRedacted() {
         let bare = [
             "dckr_pat_a1b2c3d4e5f6g7h8i9j0kl1mn2o3p4q5",
             "dckr_pat_abcdefghijklmnopqrstuvwxyzabcdef1234",
             "lin_api_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0",
         ]
-        XCTExpectFailure("KNOWN DEFECT: dckr_pat_ and lin_api_ are single case plus digits, so the entropy pass cannot see them and there is no prefix pattern. Fixing it means two rows in `patterns`, and then deleting this expectation.") {
-            for token in bare {
-                XCTAssertFalse(SecretRedactor.redact(token).contains(token),
-                               "bare provider token leaked: \(token)")
-            }
+        for token in bare {
+            XCTAssertFalse(SecretRedactor.redact(token).contains(token),
+                           "bare provider token leaked: \(token)")
         }
 
         // Controls. The labelled form is caught, so the disagreement is only about the

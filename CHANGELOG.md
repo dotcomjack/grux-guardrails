@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.6.1, 2026-08-13
+
+Three changes, all of them narrow on purpose. Two more findings from the same audit round
+are disclosed in the README rather than fixed, and the reason is stated below.
+
+**The minimum platform is now macOS 14, up from 13.** This is a real break for anyone on
+13 and it is not cosmetic tidying. `testEveryUnicodeSpellingOfALoopbackHostIsDenied`
+defends against a homograph loopback SSRF, and it holds because Foundation's `URL.host`
+applies UTS46 mapping. macOS 15 ships the rewritten swift-foundation URL parser; 13 and 14
+ship the older one. CI was raised to a matrix to test the declared minimum, and the
+`macos-13` runner never scheduled: 31 minutes queued while 14 and 15 finished in about two,
+and it held the whole run in `queued` so CI could never conclude at all. GitHub is retiring
+that runner. Rather than keep advertising a floor no CI leg can ever prove, the floor moved
+to the lowest version that is proven. macOS 14 passing is the evidence that matters here,
+because 14 ships the same older parser the concern was about.
+
+**Two provider patterns added: Docker Hub `dckr_pat_` and Linear `lin_api_`.** Both were
+invisible to every pass. They are distinctive prefixes that appear in no ordinary text, so
+adding them widens what is caught without widening what is destroyed. That is the entire
+reason these two shipped and the leaks below did not.
+
+**RFC 2765 IPv4-translated IPv6 is now decoded.** `::ffff:0:127.0.0.1` was the fourth
+member of the embedded-IPv4 family and the only one this guard did not judge by the address
+it carries. It is not routable on macOS today, so it was hardening rather than a live
+bypass, but the guard already denies `0x7f.0.0.1` on the chance a resolver reads it as
+loopback, and already denies deprecated site-local fec0::/10.
+
+The first attempt at that fix was wrong in a way worth recording: it pinned the `ffff` group
+to one byte position, which catches `::ffff:0:a.b.c.d` and misses `::ffff:0:0:a.b.c.d`,
+because how many explicit zero groups the author writes moves the group from index 5 to 4 to
+3. The check now judges the family by SHAPE, the leading twelve bytes being all zero except
+at most one aligned `ffff` group, which covers every spelling.
+
+**Disclosed, not fixed, and both are in the README's limits section.** A labelled credential
+inside a JSON array or YAML sequence survives, and so does one inside an XML or plist
+element body. Both are the same adjacency problem: the credential-word rules read a name and
+the value next to it, and a bracket or a tag between them breaks that. Widening those rules
+is the one change measured to make things worse, because they already destroy 20 of 30
+ordinary config lines whose field name merely contains a credential word, including
+`"author"` in every package.json and the OIDC `auth_url` and `token_url`.
+
+115 tests, 0 failures.
+
 ## 0.6.0, 2026-08-13
 
 **Breaking, and it is the only change: the module is renamed from `GruxKit` to `Grux`.**
