@@ -1,15 +1,14 @@
 // swift-tools-version: 5.9
-// █ dcj · dotcomjack.com · MIT
 import PackageDescription
 
 let package = Package(
-    name: "GruxKit",
+    name: "Grux",
     platforms: [.macOS(.v13)],
     products: [
-        .library(name: "GruxKit", targets: ["GruxKit"])
+        .library(name: "Grux", targets: ["Grux"])
     ],
     targets: [
-        .target(name: "GruxKit"),
-        .testTarget(name: "GruxKitTests", dependencies: ["GruxKit"])
+        .target(name: "Grux"),
+        .testTarget(name: "GruxTests", dependencies: ["Grux"])
     ]
 )

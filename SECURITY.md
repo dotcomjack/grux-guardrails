@@ -8,7 +8,7 @@ a way past `SecretRedactor` or `URLGuard`, please report it privately first.
 Use GitHub's private vulnerability reporting on this repository:
 **Security → Report a vulnerability**. That opens a channel only the maintainer can see.
 
-If that is unavailable, email **jack@dotcomjack.com** with `GruxKit security` in the
+If that is unavailable, email **security@gruxai.com** with `Grux security` in the
 subject.
 
 Please include the input that triggers it and what you expected instead. A failing test

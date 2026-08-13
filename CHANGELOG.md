@@ -72,8 +72,8 @@ wrong: two were live defects in shipped behaviour, and they had been filed as RE
 because the README sentence was the visible symptom.
 
 - **A plus-addressed email address was destroyed.**
-  `support+order-confirmation-and-shipping-updates@motorcityorganics.com` came out as
-  `[REDACTED:HIGH_ENTROPY]@motorcityorganics.com`. All lowercase, no digits, nothing
+  `support+order-confirmation-and-shipping-updates@northwindsupply.com` came out as
+  `[REDACTED:HIGH_ENTROPY]@northwindsupply.com`. All lowercase, no digits, nothing
   secret. `+` set the base64-padding flag, and that shortcut returns true before any other
   rule is consulted, so nothing downstream could object. The brake is that `+` is the
   base64 tell only in a base64 alphabet: standard base64 is `A-Za-z0-9+/`, base64url is

@@ -1,4 +1,3 @@
-// █ dcj · dotcomjack.com · MIT
 import Foundation
 
 /// Allow and deny policy for every URL the agent is asked to open or fetch.
