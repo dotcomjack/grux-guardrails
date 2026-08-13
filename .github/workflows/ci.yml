@@ -19,7 +19,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-14, macos-15]
+        # macos-13 is DELIBERATELY ABSENT. It was added here on 2026-08-13 to test the
+        # declared minimum, and it never scheduled: 31 minutes queued while 14 and 15
+        # finished in about 2, and it held BOTH runs in "queued" so CI could never reach a
+        # conclusion at all. GitHub is retiring the macOS 13 Intel hosted runner. A leg
+        # that can never report is not coverage, it just looks like coverage on the checks
+        # page, which is worse than no leg.
+        #
+        # So the homograph loopback defence in testEveryUnicodeSpellingOfALoopbackHostIsDenied
+        # is PROVEN on 14 and 15 and UNVERIFIED on 13, which the package still declares as
+        # its minimum. macOS 14 passing is real evidence, since 14 ships the same older
+        # Foundation URL parser the concern was about. Resolving that claim properly is
+        # either raising the platform to .macOS(.v14) or normalising alternate dot
+        # characters inside URLGuard instead of trusting Foundation, and both ship as 0.6.1.
+        os: [macos-14, macos-15]
     steps:
       - uses: actions/checkout@v4
       - name: Build
