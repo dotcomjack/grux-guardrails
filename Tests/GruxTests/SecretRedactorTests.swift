@@ -504,6 +504,32 @@ final class SecretRedactorTests: XCTestCase {
                                + "that renamed it to Grux:\n\(block)")
             }
         }
+
+        // The loop above only sees blocks containing `let package = Package(`, which is the
+        // WHOLE-MANIFEST example. The PRIMARY install snippet is a bare one-line
+        // .package(url:from:) and is not a manifest, so it was never checked, and the
+        // primary snippet is the line most readers actually copy. That is the mirror image
+        // of the drift this check was added for: last time the whole manifest went stale
+        // while the primary snippet was correct, and nothing here would have caught the
+        // reverse.
+        //
+        // So check every .package(url:) line in the file, wherever it lives, and require
+        // that the URL and the version floor agree with each other and with the module the
+        // README tells people to import.
+        let packageLines = readme
+            .split(separator: "\n")
+            .map(String.init)
+            .filter { $0.contains(".package(url:") }
+        XCTAssertFalse(packageLines.isEmpty,
+                       "no .package(url:) line found in README, this check has stopped testing")
+        for line in packageLines {
+            XCTAssertTrue(line.contains("dotcomjack/grux.git"),
+                          "a README install line points somewhere other than the real "
+                          + "repository:\n\(line)")
+            XCTAssertFalse(line.contains("0.5.0") || line.contains("0.4.0"),
+                           "a README install line admits a version that predates the Grux "
+                           + "rename, so `import Grux` cannot resolve from it:\n\(line)")
+        }
     }
 
     /// Regression. The 32-character floor caught ordinary long identifiers. 40 is the
