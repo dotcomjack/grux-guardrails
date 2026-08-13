@@ -93,6 +93,13 @@ public enum SecretRedactor {
             ("GITHUB_FINE_GRAINED", L + #"github_pat_[A-Za-z0-9_]{20,}"#),
             ("SLACK_TOKEN", L + #"xox[baprse]-[A-Za-z0-9\-]{20,}"#),
             ("STRIPE_WEBHOOK_SECRET", L + #"whsec_[A-Za-z0-9]{20,}"#),
+            // Both are distinctive prefixes that appear in no ordinary text, so adding them
+            // widens what is caught without widening what is destroyed. That is the whole
+            // reason these two shipped while the JSON-array leak did not: the rules that
+            // would have to widen for that one already destroy 20 of 30 ordinary config
+            // lines, and these do not touch those rules at all.
+            ("DOCKERHUB_PAT", L + #"dckr_pat_[A-Za-z0-9_-]{20,}"#),
+            ("LINEAR_API_KEY", L + #"lin_api_[A-Za-z0-9]{20,}"#),
             ("STRIPE_LIVE_SECRET", L + #"sk_live_[A-Za-z0-9]{20,}"#),
             ("STRIPE_LIVE_PUBLIC", L + #"pk_live_[A-Za-z0-9]{20,}"#),
             ("STRIPE_LIVE_RESTRICTED", L + #"rk_live_[A-Za-z0-9]{20,}"#),

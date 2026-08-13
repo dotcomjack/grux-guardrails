@@ -111,7 +111,7 @@ let clean = SecretRedactor.redact(ocrText)
 // "deploy with sk-ant-api03-…"  ->  "deploy with [REDACTED:ANTHROPIC_KEY]"
 ```
 
-Twenty-four patterns plus a generic high-entropy pass. Two properties are
+Twenty-six patterns plus a generic high-entropy pass. Two properties are
 load-bearing and both are pinned by tests:
 
 **Most specific wins.** A Stripe live key is tagged `[REDACTED:STRIPE_LIVE_SECRET]`, not
@@ -275,6 +275,12 @@ token_url: https://oauth2.example.com/...  ->  token_url: [REDACTED:ASSIGNED_SEC
 discovery fields. The rule cannot tell "this name contains auth" from "this value is a
 credential", so it takes the value. Across 30 ordinary config lines of this shape, 20 were
 destroyed. If you feed an agent config files, expect that.
+
+**The same blind spot covers an XML or plist element BODY.**
+`<password>s3cretPassw0rdForProd</password>` survives, while the attribute form
+`<user password="...">` is caught. Maven `settings.xml` and Apple `.plist` files both put
+credentials in element bodies, so if an agent reads either, expect the value through. It is
+the same adjacency problem as the JSON case and it is not fixed for the same reason.
 
 **A labelled credential inside a JSON array or a YAML sequence survives.**
 `POSTGRES_PASSWORD=s3cretPassw0rdForProd` is caught. The same secret written as

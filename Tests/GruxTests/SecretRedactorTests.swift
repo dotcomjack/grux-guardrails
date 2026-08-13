@@ -850,10 +850,22 @@ final class ReadmeClaimsTests: XCTestCase {
         let count = table.ranges(of: try! Regex(#"\("[A-Z_0-9]+","#)).count
 
         let words = ["Twelve": 12, "Thirteen": 13, "Fourteen": 14, "Fifteen": 15,
-                     "Sixteen": 16, "Seventeen": 17, "Eighteen": 18, "Nineteen": 19, "Twenty": 20, "Twenty-one": 21, "Twenty-two": 22, "Twenty-three": 23, "Twenty-four": 24, "Twenty-five": 25]
+                     "Sixteen": 16, "Seventeen": 17, "Eighteen": 18, "Nineteen": 19,
+                     "Twenty": 20, "Twenty-one": 21, "Twenty-two": 22, "Twenty-three": 23,
+                     "Twenty-four": 24, "Twenty-five": 25, "Twenty-six": 26,
+                     "Twenty-seven": 27, "Twenty-eight": 28, "Twenty-nine": 29, "Thirty": 30]
         let claimed = words.first { text.contains("\($0.key) patterns") }?.value
-        XCTAssertEqual(claimed, count,
-                       "README claims \(claimed.map(String.init) ?? "no") patterns, code has \(count)")
+        // Separate the two failures, because they have different causes and the combined
+        // message misdiagnosed itself. Adding a pattern took the count past the end of the
+        // ladder above, and the test then reported "README claims no patterns, code has 26"
+        // as though the README had lost its claim, when the real fault was this list
+        // running out of vocabulary.
+        guard let claimed else {
+            return XCTFail("no spelled-out pattern count found in README. Either the claim "
+                           + "was deleted, or the count reached \(count) and the word ladder "
+                           + "in this test needs the next entry.")
+        }
+        XCTAssertEqual(claimed, count, "README claims \(claimed) patterns, code has \(count)")
     }
 }
 

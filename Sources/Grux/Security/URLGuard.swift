@@ -513,6 +513,33 @@ public enum URLGuard {
         let first10Zero = bytes[0..<10].allSatisfy { $0 == 0 }
         let mapped = first10Zero && bytes[10] == 0xff && bytes[11] == 0xff
         let compatible = first10Zero && bytes[10] == 0 && bytes[11] == 0
+        // RFC 2765 section 2.1 IPv4-translated, the ::ffff:0:0:0/96 prefix, and the fourth
+        // member of this family. It was missed because the `ffff` sits at bytes 8 and 9
+        // rather than 10 and 11, so `first10Zero` is false and all three tests above fail,
+        // leaving `::ffff:0:127.0.0.1` to fall through as ordinary global unicast.
+        //
+        // It is not routable on macOS today: `route -n get -inet6 ::ffff:0:7f00:1` answers
+        // `not in table`, and RFC 6145 obsoleted this format. It is judged anyway for the
+        // same reason `0x7f.0.0.1` is denied on the chance a resolver reads it as loopback,
+        // and for the same reason deprecated site-local fec0::/10 is denied: a deprecated
+        // translation format carrying a loopback target is exactly what this table is for.
+        // The cost is a public IPv6 that collides with a reserved prefix, which is the
+        // trade the NAT64 rows already accepted.
+        //
+        // Pinning the `ffff` to one byte pair catches ONE spelling and misses the rest,
+        // which is how the first attempt at this failed. `::ffff:127.0.0.1` puts it in
+        // group 5, `::ffff:0:127.0.0.1` in group 4, `::ffff:0:0:127.0.0.1` in group 3,
+        // because how many explicit zero groups the author writes moves it. Judge the
+        // family by SHAPE instead: the leading twelve bytes are all zero except at most
+        // one aligned 16-bit group equal to ffff. That covers every spelling including
+        // the two already handled, and a real global unicast address cannot match it,
+        // because its leading groups carry something that is neither zero nor ffff.
+        let leadingGroups = stride(from: 0, to: 12, by: 2).map {
+            (Int(bytes[$0]) << 8) | Int(bytes[$0 + 1])
+        }
+        let nonZeroLeading = leadingGroups.filter { $0 != 0 }
+        let translated = nonZeroLeading.isEmpty
+            || (nonZeroLeading.count == 1 && nonZeroLeading[0] == 0xffff)
         // RFC 6052 well-known prefix 64:ff9b::/96, and RFC 8215 local-use 64:ff9b:1::/48.
         // Only the first was handled, so 64:ff9b:1::7f00:1 reached loopback on any host
         // running a local NAT64. Both are translation prefixes and both end in the
@@ -524,7 +551,7 @@ public enum URLGuard {
             && bytes[2] == 0xff && bytes[3] == 0x9b
             && bytes[4] == 0x00 && bytes[5] == 0x01
         let nat64 = nat64WellKnown || nat64LocalUse
-        if mapped || compatible || nat64 {
+        if mapped || compatible || nat64 || translated {
             let v4 = (Int(bytes[12]), Int(bytes[13]), Int(bytes[14]), Int(bytes[15]))
             if let reason = privateIPv4Reason(v4) {
                 return "\(reason) (embedded in IPv6)"
