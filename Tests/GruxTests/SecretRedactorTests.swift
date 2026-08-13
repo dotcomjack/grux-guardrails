@@ -486,6 +486,23 @@ final class SecretRedactorTests: XCTestCase {
             XCTAssertTrue(block.contains("platforms:"),
                           "a manifest block omits platforms, which is the exact thing that "
                           + "stopped a consumer building:\n\(block)")
+
+            // Added after a review caught the whole-manifest block still saying
+            // from: "0.5.0" beside .product(name: "Grux"), while the primary install
+            // snippet three sections above had been updated to 0.6.0. Pasteable is not
+            // the same as coherent: every check above passed on that block. The product
+            // name and the lowest version the constraint admits have to agree, because
+            // 0.5.0 and earlier declare the product as GruxKit.
+            if block.contains("\"Grux\", package:") || block.contains("product(name: \"Grux\"") {
+                XCTAssertFalse(block.contains("0.5.0") || block.contains("0.4.0"),
+                               "a manifest block asks for the Grux product while admitting a "
+                               + "version that only ships GruxKit:\n\(block)")
+            }
+            if block.contains("GruxKit") {
+                XCTAssertFalse(block.contains("0.6.0"),
+                               "a manifest block asks for the GruxKit product at a version "
+                               + "that renamed it to Grux:\n\(block)")
+            }
         }
     }
 
