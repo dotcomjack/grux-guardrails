@@ -6,7 +6,7 @@
 Every consumer's `import GruxKit` stops compiling and becomes `import Grux`. The package
 identity changes with it, so `.product(name: "GruxKit", package: "grux-kit")` becomes
 `.product(name: "Grux", package: "grux")`, and the repository moves to
-`github.com/gruxai/grux`.
+`github.com/dotcomjack/grux`.
 
 Migration is two lines and there is no behaviour change to test against:
 
@@ -15,7 +15,7 @@ Migration is two lines and there is no behaviour change to test against:
 .product(name: "GruxKit", package: "grux-kit")
 
 // after, 0.6.0
-.package(url: "https://github.com/gruxai/grux.git", from: "0.6.0")
+.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.0")
 .product(name: "Grux", package: "grux")
 ```
 
@@ -28,7 +28,17 @@ is tagged. In any of those, `import Grux` fails to resolve with
 
 Also removed: a generated banner file that shipped inside the built library, imported
 Darwin, read `ProcessInfo` environment and called `isatty`, and that nothing referenced.
-No redaction or URL-policy behaviour changed in this release. The test count is stated in
+No redaction or URL-policy behaviour changed in this release.
+
+**A known leak is disclosed rather than fixed in this release, and you should read it
+before upgrading.** A labelled credential inside a JSON array or YAML sequence survives
+redaction: `{"passwords": ["s3cretPassw0rdForProd"]}` comes back untouched while
+`POSTGRES_PASSWORD=` with the same value is caught. It predates this release and is present
+in every earlier tag. It is not fixed here because the credential-word rules are already the
+least precise part of the matcher, destroying 20 of 30 ordinary config lines whose field
+name merely contains a credential word, and widening them to walk collections would make
+that materially worse. Pinned by
+`testKnownDefectCredentialsInsideAJSONArrayOrYAMLSequenceSurvive`. The test count is stated in
 the release tag, measured on the tagged commit, rather than here where it goes stale every
 time a test lands.
 
