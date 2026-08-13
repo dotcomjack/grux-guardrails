@@ -1,6 +1,5 @@
-// █ dcj · dotcomjack.com · MIT
 import XCTest
-@testable import GruxKit
+@testable import Grux
 
 /// Table-driven coverage for the URL policy. Drives the pure
 /// `URLGuard.evaluate(_:config:)` with explicit configs, so there is no disk and no

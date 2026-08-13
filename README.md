@@ -1,16 +1,5 @@
-<!-- dcj-tag:start -->
-```
-██████╗  ██████╗     ██╗
-██╔══██╗██╔════╝     ██║
-██║  ██║██║          ██║
-██║  ██║██║     ██   ██║
-██████╔╝╚██████╗╚█████╔╝
-╚═════╝  ╚═════╝ ╚════╝
-d o t c o m j a c k
-```
-<!-- dcj-tag:end -->
 
-# GruxKit
+# Grux
 
 Guardrails for desktop AI agents, in Swift. MIT licensed.
 
@@ -31,7 +20,7 @@ promised as shipped that is not.
 ## Install
 
 ```swift
-.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.5.0")
+.package(url: "https://github.com/gruxai/grux.git", from: "0.5.0")
 ```
 
 **Use 0.5.0. Every earlier tag leaks credentials, and each one looked fine when it was
@@ -56,7 +45,7 @@ Earlier tags stay resolvable so existing checkouts do not break, and are documen
 Pre-1.0, so treat the minor version as breaking. Pin exactly if that matters to you.
 
 ```swift
-.target(name: "YourAgent", dependencies: [.product(name: "GruxKit", package: "grux-kit")])
+.target(name: "YourAgent", dependencies: [.product(name: "Grux", package: "grux")])
 ```
 
 Requires macOS 13 and Swift 5.9. No third-party dependencies.
@@ -65,7 +54,7 @@ Requires macOS 13 and Swift 5.9. No third-party dependencies.
 leaving it out is a build failure, not a warning:
 
 ```
-error: the library 'YourAgent' requires macos 10.13, but depends on the product 'GruxKit'
+error: the library 'YourAgent' requires macos 10.13, but depends on the product 'Grux'
 which requires macos 13.0
 ```
 
@@ -81,10 +70,10 @@ let package = Package(
     name: "YourAgent",
     platforms: [.macOS(.v13)],
     products: [.library(name: "YourAgent", targets: ["YourAgent"])],
-    dependencies: [.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.5.0")],
+    dependencies: [.package(url: "https://github.com/gruxai/grux.git", from: "0.5.0")],
     targets: [
         .target(name: "YourAgent",
-                dependencies: [.product(name: "GruxKit", package: "grux-kit")]),
+                dependencies: [.product(name: "Grux", package: "grux")]),
     ]
 )
 ```

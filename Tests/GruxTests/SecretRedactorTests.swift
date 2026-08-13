@@ -1,6 +1,5 @@
-// █ dcj · dotcomjack.com · MIT
 import XCTest
-@testable import GruxKit
+@testable import Grux
 
 /// Every credential-looking string in this file is synthetic. They are fixtures, not
 /// leaks, and they are short on purpose: a real key of any provider is far longer than
@@ -111,8 +110,8 @@ final class SecretRedactorTests: XCTestCase {
     /// or `_` is neither.
     func testPlusAddressedEmailsAreNotBase64() {
         let benign = [
-            "support+order-confirmation-and-shipping-updates@motorcityorganics.com",
-            "jack+monthly-newsletter-from-motorcityorganics@dotcomjack.com",
+            "support+order-confirmation-and-shipping-updates@northwindsupply.com",
+            "dana+monthly-newsletter-from-northwindsupply@example.org",
             "receipts+amazon_orders_and_returns_and_refunds@example.com",
         ]
         for text in benign {
@@ -351,7 +350,7 @@ final class SecretRedactorTests: XCTestCase {
             "/Volumes/BackupDrive2026ExternalArchive1",
             "/home_directory_backup_2026_08_10_final1",
             "/mnt/VeryLongVolumeLabelForTheNAS2026Arch",
-            "/Users/dotcomjackVeryLongSuffixHere2026x",
+            "/Users/documentsBackupArchiveFolder2026x",
             "/opt/HomebrewCellarPostgreSQL16Beta2026",
             "/tmp/ScreenRecording2026-08-10at11.24.31",
             "/Library/CoreServices2026SystemUIServer1",
@@ -380,9 +379,9 @@ final class SecretRedactorTests: XCTestCase {
     /// `segmentCount >= 4 && namelikeSegments >= 3` and all of them fail.
     func testDottedPathsAndPermalinksSurvive() {
         let benign = [
-            "https://github.com/dotcomjack/grux-kit/blob/78790dd41a807c18621e06ef82d6ec45048cef1c/README.md",
+            "https://github.com/blueharbor/data-kit/blob/78790dd41a807c18621e06ef82d6ec45048cef1c/README.md",
             "https://github.com/anthropics/claude-code/blob/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b/CHANGELOG.md",
-            "/Users/dcj/Code/proj/.build/arm64-apple-macosx/debug/ModuleCache/Foundation-RFLD5H6WW7NI.swiftmodule",
+            "/Users/dev/Code/proj/.build/arm64-apple-macosx/debug/ModuleCache/Foundation-RFLD5H6WW7NI.swiftmodule",
             "~/Library/Application Support/Grux/reports/mentions-2026-08-09.md",
             "https://storage.googleapis.com/MyBucket/Uploads/2026/08/09/ReportFinal.pdf",
             "s3://my-production-bucket/Exports/Daily/2026-08-09/UserActivitySnapshot.parquet",
@@ -824,7 +823,7 @@ final class ReadmeClaimsTests: XCTestCase {
         let source = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("Sources/GruxKit/Security/SecretRedactor.swift"),
+                .appendingPathComponent("Sources/Grux/Security/SecretRedactor.swift"),
             encoding: .utf8)
         guard let block = source.range(of: "let raw: [(String, String)] = ["),
               let end = source.range(of: "return raw", range: block.upperBound..<source.endIndex) else {

@@ -1,5 +1,5 @@
 import XCTest
-@testable import GruxKit
+@testable import Grux
 
 /// The gate. These two numbers are the definition of correct, and they are published in
 /// the README, so anyone can re-run them and check.
