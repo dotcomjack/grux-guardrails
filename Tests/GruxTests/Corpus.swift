@@ -107,6 +107,25 @@ enum Corpus {
         Case(label: "pem/yaml-block",
              text: "tls:\n  key: |\n    -----BEGIN PRIVATE KEY-----\n    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n    -----END PRIVATE KEY-----",
              secret: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+
+        // Round 9. Credentials that went through a SERIALISER on the way to the agent.
+        // Every entry above puts the name and the value next to each other in the shape a
+        // human types. These are the shapes a machine writes, and they are what an agent
+        // actually reads off disk: a credentials JSON, a lock file, a Windows env file, a
+        // pasted config block. All eight are caught today, so they belong in the gate
+        // rather than in a one-off test, where they will keep being caught.
+        //
+        // The XML attribute is here for a specific reason. Its sibling, the XML ELEMENT
+        // body, is NOT caught, and the two look interchangeable. Pinning the half that
+        // works is what stops somebody concluding from it that XML is handled.
+        Case(label: "json/escaped-unicode", text: "{\"password\": \"\\u0073ecretPassw0rd123\"}", secret: "\\u0073ecretPassw0rd123"),
+        Case(label: "json/value-on-next-line", text: "{\n  \"apiKey\":\n    \"abcdefghijklmnopqrstuvwxyz012345\"\n}", secret: "abcdefghijklmnopqrstuvwxyz012345"),
+        Case(label: "json/minified", text: "{\"a\":1,\"clientSecret\":\"abcdefghijklmnopqrstuvwxyz012345\",\"b\":2}", secret: "abcdefghijklmnopqrstuvwxyz012345"),
+        Case(label: "toml/registry", text: "[registry]\ntoken = \"abcdefghijklmnopqrstuvwxyz012345\"", secret: "abcdefghijklmnopqrstuvwxyz012345"),
+        Case(label: "ini/aws-credentials", text: "[default]\naws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", secret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
+        Case(label: "env/crlf", text: "API_TOKEN=abcdefghijklmnopqrstuvwxyz012345\r\nNEXT=1", secret: "abcdefghijklmnopqrstuvwxyz012345"),
+        Case(label: "pem/crlf", text: "-----BEGIN RSA PRIVATE KEY-----\r\nMIIEowIBAAKCAQEAxYz1234567890abcdefGHIJ\r\n-----END RSA PRIVATE KEY-----", secret: "MIIEowIBAAKCAQEAxYz1234567890abcdefGHIJ"),
+        Case(label: "xml/attribute", text: "<server password=\"s3cretPassw0rdForProd\" />", secret: "s3cretPassw0rdForProd"),
     ]
 
     // MARK: - Must never be modified
@@ -217,5 +236,32 @@ enum Corpus {
         "~/Library/Application Support/Grux/reports/mentions-2026-08-09.md",
         "https://storage.googleapis.com/MyBucket/Uploads/2026/08/09/ReportFinal.pdf",
         "s3://my-production-bucket/Exports/Daily/2026-08-09/UserActivitySnapshot.parquet",
+
+        // Round 9. Ordinary text whose FIELD NAME contains a credential word, in the
+        // formats an agent reads most. Each of these survives today for a different
+        // reason, and that variety is the point: one is saved by the whitespace brake, one
+        // by the value being under twenty characters, one by the value terminating at a
+        // comma before it gets long enough, one because a bracket is not a quote.
+        //
+        // They are here because the neighbouring shapes with a COLON separator and a
+        // quoted value are NOT saved, which is filed as a known defect in
+        // AdversarialRound2Tests. Holding the surviving half in the published gate is what
+        // stops a fix for that defect from being written as a blunt widening that takes
+        // these with it.
+        "@keyframes slideIn { from { opacity: 0 } }",
+        "Cookie policy: we use cookies to improve your experience",
+        "<key>NSPrivacyAccessedAPITypes</key>",
+        "let keywords = [\"alpha\", \"beta\"]",
+        "authors: Jane Doe, John Roe and Sam Poe",
+        "signingKeyAlias = \"release-upload-key\"",
+        "<meta name=\"keywords\" content=\"swift, security, redaction\">",
+        // A commit RANGE, which is two 40 character hex digests joined by two dots. Single
+        // case is what protects them, and it has to keep protecting them across a
+        // separator that is not whitespace.
+        "git log 4f9a2c1e8d7b6a5f4e3d2c1b0a9f8e7d6c5b4a39..8e7d6c5b4a394f9a2c1e8d7b6a5f4e3d2c1b0a9f",
+        // A bare UUID. It is also the exact shape of a Railway API token, and that
+        // collision is why it can only ever be caught by its label. Redacting it bare
+        // would eat the identifier in every log line an agent reads.
+        "8f2b1c4d-3e5a-4b6c-9d8e-1f2a3b4c5d6e",
     ]
 }
