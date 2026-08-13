@@ -110,8 +110,8 @@ final class SecretRedactorTests: XCTestCase {
     /// or `_` is neither.
     func testPlusAddressedEmailsAreNotBase64() {
         let benign = [
-            "support+order-confirmation-and-shipping-updates@northwindsupply.com",
-            "dana+monthly-newsletter-from-northwindsupply@example.org",
+            "support+order-confirmation-and-shipping-updates@example.com",
+            "dana+monthly-newsletter-from-quarterlydigest@example.org",
             "receipts+amazon_orders_and_returns_and_refunds@example.com",
         ]
         for text in benign {
@@ -379,7 +379,7 @@ final class SecretRedactorTests: XCTestCase {
     /// `segmentCount >= 4 && namelikeSegments >= 3` and all of them fail.
     func testDottedPathsAndPermalinksSurvive() {
         let benign = [
-            "https://github.com/blueharbor/data-kit/blob/78790dd41a807c18621e06ef82d6ec45048cef1c/README.md",
+            "https://github.com/acmewidget/demo-kit/blob/78790dd41a807c18621e06ef82d6ec45048cef1c/README.md",
             "https://github.com/anthropics/claude-code/blob/1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b/CHANGELOG.md",
             "/Users/dev/Code/proj/.build/arm64-apple-macosx/debug/ModuleCache/Foundation-RFLD5H6WW7NI.swiftmodule",
             "~/Library/Application Support/Grux/reports/mentions-2026-08-09.md",

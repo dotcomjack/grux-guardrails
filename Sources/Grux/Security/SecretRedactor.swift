@@ -763,8 +763,8 @@ public enum SecretRedactor {
         // The brake exists because this shortcut returns true before ANY other rule gets a
         // say, so anything it gets wrong is unrecoverable. Without it, a plus-addressed
         // email address was destroyed the moment its local part reached 40 characters:
-        // `support+order-confirmation-and-shipping-updates@northwindsupply.com` came out
-        // as `[REDACTED:HIGH_ENTROPY]@northwindsupply.com`. All lowercase, no digit, and
+        // `support+order-confirmation-and-shipping-updates@example.com` came out
+        // as `[REDACTED:HIGH_ENTROPY]@example.com`. All lowercase, no digit, and
         // nothing downstream could object because this line had already returned.
         //
         // The brake is `+` TOGETHER WITH `-` or `_`, and the precision matters more than it

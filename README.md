@@ -20,19 +20,29 @@ promised as shipped that is not.
 ## Install
 
 ```swift
-.package(url: "https://github.com/gruxai/grux.git", from: "0.5.0")
+.package(url: "https://github.com/gruxai/grux.git", from: "0.6.0")
 ```
 
-**Use 0.5.0. Every earlier tag leaks credentials, and each one looked fine when it was
-cut.** That second half is the part worth reading: six tags were published before this one
-and all six were later found to leak, including by audits of code that had already survived
+**Use 0.6.0. Every earlier tag leaks credentials, and each one looked fine when it was
+cut.** That second half is the part worth reading: six tags were published before 0.5.0 and
+all six were later found to leak, including by audits of code that had already survived
 several earlier ones. 0.5.0 is the most heavily audited state this library has been in and
-that is a statement about effort, not a guarantee.
+that is a statement about effort, not a guarantee. 0.6.0 is 0.5.0 with the module renamed
+and nothing else.
+
+**The module was `GruxKit` up to and including 0.5.0, and is `Grux` from 0.6.0 onward.**
+That rename is the only breaking change in 0.6.0, and it is why the snippet below says
+`from: "0.6.0"` rather than `from: "0.5.0"`. Pinning 0.5.0 while writing `import Grux`
+fails at resolve time with `product 'Grux' not found`, because 0.5.0 declares the product
+as `GruxKit`. If you are pinned to 0.5.0 or earlier, keep `import GruxKit` until you bump.
 
 What the earlier tags actually do. 0.1.0 passes private key bodies straight through to the
 model and has a forgeable injection fence. 0.2.0 and 0.2.1 leak the AWS secret access key,
 and 0.2.0 additionally carries the base64 blindness and the quadratic pass that 0.3.0
-fixed. 0.3.0 and 0.3.1 are superseded by the audit rounds recorded in the changelog. And
+fixed. 0.3.0's own path heuristic discards 14% of AWS secret access keys. 0.3.1 sends every
+`NAME=value` secret shorter than 40 characters out in plaintext, and shipped a test that
+pinned that leak as correct behaviour, which is the worst kind because the suite was green
+the whole time. Both were fixed in 0.4.0. And
 0.4.0, measured against a real build of it rather than inferred from its changelog, allows
 the loopback and NAT64 SSRF bypasses and leaks indented PEM bodies, `PGPASSWORD=`, session
 cookies, `Set-Cookie`, bare `Bearer` headers and `curl -u` passwords. Worst of that set,
