@@ -384,10 +384,15 @@ final class AdversarialRound2Tests: XCTestCase {
             ("YAML sequence, the dash form",
              "passwords:\n  - s3cretPassw0rdForProd", "s3cretPassw0rdForProd"),
         ]
-        XCTExpectFailure("KNOWN DEFECT: redactLabelledValues does not step over a container opener, so every element of a JSON array or YAML sequence leaks. Fixing it means skipping `[` and a YAML `- ` after the separator, and then deleting this expectation.") {
-            for (note, text, secret) in cases {
-                XCTAssertFalse(SecretRedactor.redact(text).contains(secret),
-                               "leaked: \(note)\n   in : \(text)\n   out: \(SecretRedactor.redact(text))")
+        // ONE EXPECTATION PER CASE, deliberately, not one wrapped around the table.
+        // With a single expectation around the loop, ONE recorded failure satisfies it,
+        // so a PARTIAL fix leaves the suite green and ships believed complete. Per case,
+        // the moment any one of them starts passing, its own expectation goes unmet and
+        // the suite goes red, which is what this file claims to guarantee.
+        for (note, text, secret) in cases {
+            XCTExpectFailure("KNOWN DEFECT: redactLabelledValues does not step over a container opener, so every element of a JSON array or YAML sequence leaks. Fixing it means skipping `[` and a YAML `- ` after the separator, and then deleting this expectation. [case: \(note)]") {
+                    XCTAssertFalse(SecretRedactor.redact(text).contains(secret),
+                                   "leaked: \(note)\n   in : \(text)\n   out: \(SecretRedactor.redact(text))")
             }
         }
 
@@ -430,10 +435,15 @@ final class AdversarialRound2Tests: XCTestCase {
              "<key>APIToken</key>\n<string>abcdefghijklmnopqrstuvwxyz012345</string>",
              "abcdefghijklmnopqrstuvwxyz012345"),
         ]
-        XCTExpectFailure("KNOWN DEFECT: an XML or plist element BODY is not reachable by redactLabelledValues, though the attribute form is. Fixing it means accepting `>` as a separator, and for plist recognising the key and string pairing. Then delete this expectation.") {
-            for (note, text, secret) in cases {
-                XCTAssertFalse(SecretRedactor.redact(text).contains(secret),
-                               "leaked: \(note)\n   in : \(text)\n   out: \(SecretRedactor.redact(text))")
+        // ONE EXPECTATION PER CASE, deliberately, not one wrapped around the table.
+        // With a single expectation around the loop, ONE recorded failure satisfies it,
+        // so a PARTIAL fix leaves the suite green and ships believed complete. Per case,
+        // the moment any one of them starts passing, its own expectation goes unmet and
+        // the suite goes red, which is what this file claims to guarantee.
+        for (note, text, secret) in cases {
+            XCTExpectFailure("KNOWN DEFECT: an XML or plist element BODY is not reachable by redactLabelledValues, though the attribute form is. Fixing it means accepting `>` as a separator, and for plist recognising the key and string pairing. Then delete this expectation. [case: \(note)]") {
+                    XCTAssertFalse(SecretRedactor.redact(text).contains(secret),
+                                   "leaked: \(note)\n   in : \(text)\n   out: \(SecretRedactor.redact(text))")
             }
         }
     }
@@ -517,10 +527,15 @@ final class AdversarialRound2Tests: XCTestCase {
             "  token_url: \"https://accounts.example.com/token\"",
             "\"passwordPolicy\": \"minimum twelve characters\"",
         ]
-        XCTExpectFailure("KNOWN DEFECT: isWhitespaceSeparable brakes the whitespace separator only, so a buried credential word is fully trusted before a colon. 20 of 30 measured real-world config lines are destroyed. Fixing it means applying the same name brake, or the locator brake, to the colon path, and then deleting this expectation.") {
-            for text in ordinary {
-                XCTAssertEqual(SecretRedactor.redact(text), text,
-                               "ordinary configuration was destroyed:\n   in : \(text)\n   out: \(SecretRedactor.redact(text))")
+        // ONE EXPECTATION PER CASE, deliberately, not one wrapped around the table.
+        // With a single expectation around the loop, ONE recorded failure satisfies it,
+        // so a PARTIAL fix leaves the suite green and ships believed complete. Per case,
+        // the moment any one of them starts passing, its own expectation goes unmet and
+        // the suite goes red, which is what this file claims to guarantee.
+        for text in ordinary {
+            XCTExpectFailure("KNOWN DEFECT: isWhitespaceSeparable brakes the whitespace separator only, so a buried credential word is fully trusted before a colon. 20 of 30 measured real-world config lines are destroyed. Fixing it means applying the same name brake, or the locator brake, to the colon path, and then deleting this expectation. [case: \(text)]") {
+                    XCTAssertEqual(SecretRedactor.redact(text), text,
+                                   "ordinary configuration was destroyed:\n   in : \(text)\n   out: \(SecretRedactor.redact(text))")
             }
         }
 

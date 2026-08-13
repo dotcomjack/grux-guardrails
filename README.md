@@ -66,14 +66,14 @@ Pre-1.0, so treat the minor version as breaking. Pin exactly if that matters to 
 .target(name: "YourAgent", dependencies: [.product(name: "Grux", package: "grux")])
 ```
 
-Requires macOS 13 and Swift 5.9. No third-party dependencies.
+Requires macOS 14 and Swift 5.9. No third-party dependencies.
 
-**Your own manifest needs `platforms: [.macOS(.v13)]` too.** That line is not optional and
+**Your own manifest needs `platforms: [.macOS(.v14)]` too.** That line is not optional and
 leaving it out is a build failure, not a warning:
 
 ```
 error: the library 'YourAgent' requires macos 10.13, but depends on the product 'Grux'
-which requires macos 13.0
+which requires macos 14.0
 ```
 
 So the whole manifest, and this time it really is the whole file, opening pragma and import
@@ -86,7 +86,7 @@ import PackageDescription
 
 let package = Package(
     name: "YourAgent",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [.library(name: "YourAgent", targets: ["YourAgent"])],
     dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.0")],
     targets: [
