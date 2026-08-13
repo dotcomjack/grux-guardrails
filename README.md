@@ -20,7 +20,7 @@ promised as shipped that is not.
 ## Install
 
 ```swift
-.package(url: "https://github.com/gruxai/grux.git", from: "0.6.0")
+.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.0")
 ```
 
 **Use 0.6.0. Every earlier tag leaks credentials, and each one looked fine when it was
@@ -88,7 +88,7 @@ let package = Package(
     name: "YourAgent",
     platforms: [.macOS(.v13)],
     products: [.library(name: "YourAgent", targets: ["YourAgent"])],
-    dependencies: [.package(url: "https://github.com/gruxai/grux.git", from: "0.6.0")],
+    dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.0")],
     targets: [
         .target(name: "YourAgent",
                 dependencies: [.product(name: "Grux", package: "grux")]),
@@ -259,6 +259,24 @@ It is a matcher, not a parser, so it cannot catch a secret that does not look li
 A password, a session cookie with a short opaque value, an internal hostname, or a
 credential in a format no pattern covers all pass straight through. New providers appear
 constantly and this list will always trail them.
+
+**A labelled credential inside a JSON array or a YAML sequence survives.**
+`POSTGRES_PASSWORD=s3cretPassw0rdForProd` is caught. The same secret written as
+`{"passwords": ["s3cretPassw0rdForProd"]}` is not, and comes back untouched. The
+credential-word rules read a name and the value that follows it, and a bracket between the
+two breaks that adjacency, so the value is never examined. Any config format that groups
+secrets under a plural key is affected, which includes a great deal of real Kubernetes,
+Docker Compose and CI configuration.
+
+This is not fixed, and the reason is the sentence above about false positives rather than
+laziness. Widening the credential-word rules to walk into collections makes them fire on
+far more text, and they are already the least precise thing here: measured over 30 ordinary
+config lines whose field name merely CONTAINS a credential word, 20 of them were destroyed.
+Trading one missed shape for twenty mangled configs is the wrong direction for a tool whose
+whole argument is that destroying ordinary text is worse than missing. It is pinned by
+`testKnownDefectCredentialsInsideAJSONArrayOrYAMLSequenceSurvive` so it cannot regress
+quietly, and it is written here so nobody discovers it the hard way. If you feed an agent
+structured config, do not rely on this to catch secrets inside collections.
 
 **Base64 data URIs and integrity hashes get destroyed, and that one is paid in the other
 direction.** Inline images, inline fonts, CSS `url(data:...)` and the
