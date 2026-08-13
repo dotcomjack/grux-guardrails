@@ -31,10 +31,16 @@ that is a statement about effort, not a guarantee. 0.6.0 is 0.5.0 with the modul
 and nothing else.
 
 **The module was `GruxKit` up to and including 0.5.0, and is `Grux` from 0.6.0 onward.**
-That rename is the only breaking change in 0.6.0, and it is why the snippet below says
-`from: "0.6.0"` rather than `from: "0.5.0"`. Pinning 0.5.0 while writing `import Grux`
-fails at resolve time with `product 'Grux' not found`, because 0.5.0 declares the product
-as `GruxKit`. If you are pinned to 0.5.0 or earlier, keep `import GruxKit` until you bump.
+That rename is the only breaking change in 0.6.0, and it is why every snippet below says
+`from: "0.6.0"`.
+
+Be precise about what breaks, because `from:` is a range and not a pin. `from: "0.6.0"`
+means `[0.6.0, 1.0.0)`, so it can only ever resolve to a tag that has the `Grux` product.
+What fails is a constraint that actually holds you at or below 0.5.0: `.exact("0.5.0")`,
+or an `upToNextMinor` range, or `from: "0.5.0"` evaluated before 0.6.0 is tagged. In any of
+those, `import Grux` fails to resolve with `product 'Grux' not found`, because 0.5.0
+declares the product as `GruxKit`. If you are held at 0.5.0 or earlier for any reason, keep
+`import GruxKit` until you bump.
 
 What the earlier tags actually do. 0.1.0 passes private key bodies straight through to the
 model and has a forgeable injection fence. 0.2.0 and 0.2.1 leak the AWS secret access key,
@@ -82,7 +88,7 @@ let package = Package(
     name: "YourAgent",
     platforms: [.macOS(.v13)],
     products: [.library(name: "YourAgent", targets: ["YourAgent"])],
-    dependencies: [.package(url: "https://github.com/gruxai/grux.git", from: "0.5.0")],
+    dependencies: [.package(url: "https://github.com/gruxai/grux.git", from: "0.6.0")],
     targets: [
         .target(name: "YourAgent",
                 dependencies: [.product(name: "Grux", package: "grux")]),
