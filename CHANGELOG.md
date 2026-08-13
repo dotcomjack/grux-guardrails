@@ -19,13 +19,18 @@ Migration is two lines and there is no behaviour change to test against:
 .product(name: "Grux", package: "grux")
 ```
 
-Pinning 0.5.0 while writing `import Grux` fails at resolve time with
-`product 'Grux' not found`, because no tag at or below 0.5.0 declares that product name.
+Be precise about what breaks, because `from:` is a range and not a pin. `from: "0.6.0"`
+means `[0.6.0, 1.0.0)`, so it can only ever resolve to a tag that carries the `Grux`
+product. What fails is a constraint that actually holds you at or below 0.5.0:
+`.exact("0.5.0")`, an `upToNextMinor` range, or `from: "0.5.0"` evaluated before 0.6.0
+is tagged. In any of those, `import Grux` fails to resolve with
+`product 'Grux' not found`, because 0.5.0 declares the product as `GruxKit`.
 
 Also removed: a generated banner file that shipped inside the built library, imported
 Darwin, read `ProcessInfo` environment and called `isatty`, and that nothing referenced.
-No redaction or URL-policy behaviour changed in this release, and the suite is unchanged
-at 96 tests.
+No redaction or URL-policy behaviour changed in this release. The test count is stated in
+the release tag, measured on the tagged commit, rather than here where it goes stale every
+time a test lands.
 
 ## 0.5.0, 2026-08-10
 
