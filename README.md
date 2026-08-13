@@ -24,13 +24,15 @@ promised as shipped that is not.
 ```
 
 **Use 0.5.0. Every earlier tag leaks credentials, and each one looked fine when it was
-cut.** That second half is the part worth reading: five tags have been published and all
-five were later found to leak, including by audits of code that had already survived several
-earlier ones. 0.5.0 is the most heavily audited state this library has been in and that is a
-statement about effort, not a guarantee.
+cut.** That second half is the part worth reading: six tags were published before this one
+and all six were later found to leak, including by audits of code that had already survived
+several earlier ones. 0.5.0 is the most heavily audited state this library has been in and
+that is a statement about effort, not a guarantee.
 
 What the earlier tags actually do. 0.1.0 passes private key bodies straight through to the
-model and has a forgeable injection fence. 0.2.x leaks the AWS secret access key. And
+model and has a forgeable injection fence. 0.2.0 and 0.2.1 leak the AWS secret access key,
+and 0.2.0 additionally carries the base64 blindness and the quadratic pass that 0.3.0
+fixed. 0.3.0 and 0.3.1 are superseded by the audit rounds recorded in the changelog. And
 0.4.0, measured against a real build of it rather than inferred from its changelog, allows
 the loopback and NAT64 SSRF bypasses and leaks indented PEM bodies, `PGPASSWORD=`, session
 cookies, `Set-Cookie`, bare `Bearer` headers and `curl -u` passwords. Worst of that set,
