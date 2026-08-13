@@ -260,6 +260,22 @@ A password, a session cookie with a short opaque value, an internal hostname, or
 credential in a format no pattern covers all pass straight through. New providers appear
 constantly and this list will always trail them.
 
+**Ordinary config lines are destroyed when the field NAME merely contains a credential
+word.** This is the limitation most likely to affect you, and it fires on text that is not
+secret at all. Measured directly:
+
+```
+"author": "Alice Smith and Bob Jones"      ->  "author": "[REDACTED:ASSIGNED_SECRET]"
+"keywords": "swift, security, redaction"   ->  "keywords": "[REDACTED:ASSIGNED_SECRET]"
+auth_url: https://accounts.example.com/... ->  auth_url: [REDACTED:ASSIGNED_SECRET]
+token_url: https://oauth2.example.com/...  ->  token_url: [REDACTED:ASSIGNED_SECRET]
+```
+
+`author` appears in every `package.json`. `auth_url` and `token_url` are the standard OIDC
+discovery fields. The rule cannot tell "this name contains auth" from "this value is a
+credential", so it takes the value. Across 30 ordinary config lines of this shape, 20 were
+destroyed. If you feed an agent config files, expect that.
+
 **A labelled credential inside a JSON array or a YAML sequence survives.**
 `POSTGRES_PASSWORD=s3cretPassw0rdForProd` is caught. The same secret written as
 `{"passwords": ["s3cretPassw0rdForProd"]}` is not, and comes back untouched. The
