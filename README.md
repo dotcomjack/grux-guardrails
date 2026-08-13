@@ -254,10 +254,24 @@ A password, a session cookie with a short opaque value, an internal hostname, or
 credential in a format no pattern covers all pass straight through. New providers appear
 constantly and this list will always trail them.
 
+**Base64 data URIs and integrity hashes get destroyed, and that one is paid in the other
+direction.** Inline images, inline fonts, CSS `url(data:...)` and the
+`integrity="sha384-..."` on every CDN script tag are all long high-entropy runs in a base64
+alphabet, which is precisely the shape of a credential. Nothing here can tell them apart by
+shape, so if you feed an agent raw HTML, expect inline assets to come back redacted. The
+obvious fix, exempting whatever follows `;base64,`, is a trap: that prefix appears in text
+the agent is reading, so an attacker writes `data:image/png;base64,sk_live_...` and walks a
+live key straight through. The cost is pinned by a test instead of removed. One asymmetry
+worth knowing: a JPEG data URI survives, because its body opens `/9j/` and the leading
+slashes land it in the path exclusions. Same construct, opposite outcome, decided by the
+payload rather than by any rule.
+
 **Single-case hex strings are deliberately exempt, and that is a real gap, not just a
 feature.** It is what keeps git SHAs, md5 and sha256 checksums intact, and those appear
 constantly in the logs and diffs an agent reads. The cost is that a 32 or 64 character
-lowercase-hex API secret, which several providers still issue, goes through untouched. It
+lowercase-hex API secret, which several providers still issue, goes through untouched.
+A Twilio auth token is the everyday example: `auth_token=<32 hex>` is caught by the
+assignment rule, and the same 32 characters standing alone in a log line are not. It
 is a tradeoff and I would make it again, but you should know which side of it you are on.
 If your stack uses hex secrets, add a pattern for them rather than relying on the generic
 pass.
