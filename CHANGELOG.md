@@ -11,8 +11,7 @@ identity changes with it, so `.product(name: "GruxKit", package: "grux-kit")` be
 Migration is two lines and there is no behaviour change to test against:
 
 ```swift
-// before, 0.5.0 and earlier
-.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.5.0")
+// before, 0.5.0 and earlier: whichever URL you already have, plus
 .product(name: "GruxKit", package: "grux-kit")
 
 // after, 0.6.0
