@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.0, unreleased
+
+**Breaking, and it is the only change: the module is renamed from `GruxKit` to `Grux`.**
+Every consumer's `import GruxKit` stops compiling and becomes `import Grux`. The package
+identity changes with it, so `.product(name: "GruxKit", package: "grux-kit")` becomes
+`.product(name: "Grux", package: "grux")`, and the repository moves to
+`github.com/gruxai/grux`.
+
+Migration is two lines and there is no behaviour change to test against:
+
+```swift
+// before, 0.5.0 and earlier
+.package(url: "https://github.com/dotcomjack/grux-kit.git", from: "0.5.0")
+.product(name: "GruxKit", package: "grux-kit")
+
+// after, 0.6.0
+.package(url: "https://github.com/gruxai/grux.git", from: "0.6.0")
+.product(name: "Grux", package: "grux")
+```
+
+Pinning 0.5.0 while writing `import Grux` fails at resolve time with
+`product 'Grux' not found`, because no tag at or below 0.5.0 declares that product name.
+
+Also removed: a generated banner file that shipped inside the built library, imported
+Darwin, read `ProcessInfo` environment and called `isatty`, and that nothing referenced.
+No redaction or URL-policy behaviour changed in this release, and the suite is unchanged
+at 96 tests.
+
 ## 0.5.0, 2026-08-10
 
 Eight audit rounds of the redactor and the URL guard. Every defect below was found by
@@ -72,8 +100,8 @@ wrong: two were live defects in shipped behaviour, and they had been filed as RE
 because the README sentence was the visible symptom.
 
 - **A plus-addressed email address was destroyed.**
-  `support+order-confirmation-and-shipping-updates@northwindsupply.com` came out as
-  `[REDACTED:HIGH_ENTROPY]@northwindsupply.com`. All lowercase, no digits, nothing
+  `support+order-confirmation-and-shipping-updates@example.com` came out as
+  `[REDACTED:HIGH_ENTROPY]@example.com`. All lowercase, no digits, nothing
   secret. `+` set the base64-padding flag, and that shortcut returns true before any other
   rule is consulted, so nothing downstream could object. The brake is that `+` is the
   base64 tell only in a base64 alphabet: standard base64 is `A-Za-z0-9+/`, base64url is
