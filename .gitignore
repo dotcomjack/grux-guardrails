@@ -3,3 +3,6 @@
 .DS_Store
 *.xcodeproj
 Package.resolved
+
+# Multi-session coordination board. Internal notes, never publishable.
+.board/

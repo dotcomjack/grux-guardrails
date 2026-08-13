@@ -7,7 +7,19 @@ on:
 
 jobs:
   test:
-    runs-on: macos-15
+    # Package.swift declares .macOS(.v13), so CI has to run the DECLARED MINIMUM and not
+    # only the newest runner. This matters more here than it would in most packages:
+    # testEveryUnicodeSpellingOfALoopbackHostIsDenied defends against a loopback SSRF
+    # bypass, and its own comment says the only thing standing between this library and
+    # that bypass is a Foundation implementation detail. macOS 15 ships the rewritten
+    # swift-foundation URL parser; 13 and 14 ship the older one, whose URL.host may not
+    # apply the same UTS46 mapping. Testing only macos-15 would let that difference reach
+    # a consumer on the minimum we advertise, with no CI leg able to see it.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14, macos-15]
     steps:
       - uses: actions/checkout@v4
       - name: Build
