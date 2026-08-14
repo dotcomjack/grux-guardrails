@@ -4,34 +4,6 @@
 [![CI](https://github.com/dotcomjack/grux/actions/workflows/ci.yml/badge.svg)](https://github.com/dotcomjack/grux/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/badge/licence-MIT-8C6A2F)](LICENSE)
 
-<!-- THREE SWIFT PACKAGE INDEX BADGES WERE REMOVED HERE, AND THEY GO BACK IN LATER.
-     Do not re-add them until swiftpackageindex.com has actually indexed this package.
-     SPI clones and BUILDS a package to produce those badges, so it only ever sees a
-     public repository. While this one was private the two dynamic badges rendered the
-     literal word "pending" in grey (measured, not assumed: the shields endpoint was
-     fetched and its SVG text read), and the Documentation badge rendered fine but
-     linked to a page SPI had never built.
-
-     That is three of five badges in the first hundred pixels either admitting they know
-     nothing or pointing at nothing, on a README whose whole argument is that every claim
-     on it is either proven or an admitted failure. A grey "pending" is the only thing on
-     the page that reads as unfinished rather than honest, which is a strange note to open
-     a launch on.
-
-     PUT THEM BACK once SPI lists the package, which needs the repo public first:
-
-     [![Platforms](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fdotcomjack%2Fgrux%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/dotcomjack/grux)
-     [![Swift](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fdotcomjack%2Fgrux%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/dotcomjack/grux)
-     [![Documentation](https://img.shields.io/badge/documentation-gray?logo=swift&logoColor=white)](https://swiftpackageindex.com/dotcomjack/grux/documentation)
-
-     Check first, and check the rendered SVG rather than the HTTP status, because a
-     pending badge is a perfectly healthy 200:
-       curl -sSL "https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fdotcomjack%2Fgrux%2Fbadge%3Ftype%3Dplatforms" | grep -o '>[^<>]*</text>'
-     It is ready when that prints macOS instead of pending.
-
-     .spi.yml stays regardless. It is the submission manifest and costs nothing while
-     unlisted. -->
-
 
 Guardrails for desktop AI agents, in Swift. MIT licensed. Short version: [gruxai.com](https://gruxai.com).
 
@@ -86,8 +58,10 @@ when it was cut. That disclosure has its own section:
 
 Read this part. It is the section a security library is actually judged on, and each
 module has its own longer one, [for SecretRedactor](#secretredactor-what-it-does-not-do)
-and [for URLGuard](#urlguard-what-it-does-not-do). The short version, with every line
-below pinned by a test so it cannot drift quietly:
+and [for URLGuard](#urlguard-what-it-does-not-do). What this library is responsible for and
+what it deliberately is not, written out as attacker, asset and boundary rather than left
+implied by a feature list, is in [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md). The short
+version, with every line below pinned by a test so it cannot drift quietly:
 
 - **SecretRedactor is a matcher, not a parser**, so a credential in a format no pattern
   covers passes straight through, by construction.
@@ -147,7 +121,10 @@ than a bare host matches nothing at all.** `https://evil.com`, `evil.com:443` an
 fails open and looks configured.
 
 Earlier tags stay resolvable so existing checkouts do not break, and are documented in
-[CHANGELOG.md](CHANGELOG.md) so nobody adopts one by accident.
+[CHANGELOG.md](CHANGELOG.md) so nobody adopts one by accident. Each one also has its own
+GitHub release saying plainly that it leaks and what to move to. The per-tag disclosure,
+with a severity and a vector for each, is in
+[docs/DISCLOSURE-2026-08.md](docs/DISCLOSURE-2026-08.md).
 
 Pre-1.0, so treat the minor version as breaking. If pinning exactly matters to you, pin
 `.exact("0.6.1")`, which is the current tag, and not an earlier one.
@@ -600,7 +577,9 @@ Nothing here asks to be believed. Every claim in this section is one command.
 **115 tests, 0 failures**, on macOS 14 and macOS 15, which is the CI matrix. Run
 `swift test`. Count them with `grep -rho 'func test' Tests/ | wc -l`. There is no coverage
 percentage anywhere in this repo on purpose: a high one is easy to reach with weak tests,
-and the corpus files are the honest artifact instead.
+and the corpus files are the honest artifact instead. What is in those corpora, how they
+are built, and which direction each one is allowed to fail in is in
+[docs/CORPUS.md](docs/CORPUS.md).
 
 **Tags are signed from 0.6.0 onward, and 0.1.0 through 0.5.0 are not.** Check with
 `git tag -v 0.6.1`. Expect the output to read `Good "git" signature`, with the word `git`
@@ -644,3 +623,31 @@ issue. Use GitHub's private vulnerability reporting on this repository, and see
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+<!-- THREE SWIFT PACKAGE INDEX BADGES WERE REMOVED HERE, AND THEY GO BACK IN LATER.
+     Do not re-add them until swiftpackageindex.com has actually indexed this package.
+     SPI clones and BUILDS a package to produce those badges, so it only ever sees a
+     public repository. While this one was private the two dynamic badges rendered the
+     literal word "pending" in grey (measured, not assumed: the shields endpoint was
+     fetched and its SVG text read), and the Documentation badge rendered fine but
+     linked to a page SPI had never built.
+
+     That is three of five badges in the first hundred pixels either admitting they know
+     nothing or pointing at nothing, on a README whose whole argument is that every claim
+     on it is either proven or an admitted failure. A grey "pending" is the only thing on
+     the page that reads as unfinished rather than honest, which is a strange note to open
+     a launch on.
+
+     PUT THEM BACK once SPI lists the package, which needs the repo public first:
+
+     [![Platforms](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fdotcomjack%2Fgrux%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/dotcomjack/grux)
+     [![Swift](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fdotcomjack%2Fgrux%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/dotcomjack/grux)
+     [![Documentation](https://img.shields.io/badge/documentation-gray?logo=swift&logoColor=white)](https://swiftpackageindex.com/dotcomjack/grux/documentation)
+
+     Check first, and check the rendered SVG rather than the HTTP status, because a
+     pending badge is a perfectly healthy 200:
+       curl -sSL "https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fdotcomjack%2Fgrux%2Fbadge%3Ftype%3Dplatforms" | grep -o '>[^<>]*</text>'
+     It is ready when that prints macOS instead of pending.
+
+     .spi.yml stays regardless. It is the submission manifest and costs nothing while
+     unlisted. -->

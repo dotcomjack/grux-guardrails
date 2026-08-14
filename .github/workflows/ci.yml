@@ -58,9 +58,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       # Em dashes and en dashes are banned in this repo, including in comments and
       # docs. Cheap to check, annoying to fix after the fact.
+      # json is in the list because docs/advisories/*.json carry advisory bodies that
+      # get published verbatim as GitHub Security Advisories. Prose in a data file is
+      # still prose, and it was outside this check until the advisories landed.
       - name: No em dashes or en dashes
         run: |
-          if grep -rnP '[\x{2013}\x{2014}]' --include='*.swift' --include='*.md' --include='*.yml' .; then
+          if grep -rnP '[\x{2013}\x{2014}]' --include='*.swift' --include='*.md' --include='*.yml' --include='*.json' .; then
             echo "::error::found an em dash or en dash, use a comma, colon or full stop"
             exit 1
           fi

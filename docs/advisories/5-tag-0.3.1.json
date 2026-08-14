@@ -1,0 +1,19 @@
+{
+  "summary": "Grux 0.3.1 sends every labelled secret shorter than 40 characters out in plaintext, behind a test that pinned the leak as correct",
+  "description": "**Description**\n\n0.3.1 was a cosmetic release: it fixed label-swallowing, a NAT64 local-use input, and\nversion signposting. Its one functional change traded that cosmetic complaint for a security\nregression.\n\n**Every `NAME=value` secret shorter than 40 characters went out in plaintext.** The generic\nentropy pass carries a 40-character floor, and with label handling removed there was nothing\nelse looking at `NAME=value`. Most real credentials are shorter than 40 characters, so the\npractical effect is that labelled secret handling stopped working.\n\n**A test was added that pinned the leak as correct behaviour.** It asserted `redact(s) == s`\nagainst a live-shaped bearer token, so the suite reported green on the leak, and the next\nperson to fix it would have had to delete an assertion that looked deliberate.\n\n**Impact**\n\nThis is the broadest leak in the set. Any `API_KEY=`, `DB_PASSWORD=`, `TOKEN=` or similar\nunder 40 characters reaches the model provider verbatim.\n\nIt scores the same 8.6 as the other credential leaks here, and it is the most dangerous of\nthem for a reason CVSS has no dial for: **the test suite was green throughout.** Every other\ndefect in this set could in principle be caught by a caller who wrote a test. This one\nshipped with a test asserting the leak was intended.\n\n**Patches**\n\nFixed in 0.4.0, which replaced the length floor with label recognition: `HF_TOKEN=`,\n`AWS_SECRET_ACCESS_KEY=`, `\"api_key\":` and friends have their value redacted regardless of\nits length or shape. The test that pinned the leak was rewritten in the same release.\n\n**Do not move to 0.4.0**, see Advisory 6. Move to **0.5.0**.\n\n**Workarounds**\n\nNone. Padding secrets to 40 characters is not a workaround, it is a coincidence.\n\n**References**\n\n`CHANGELOG.md` sections 0.3.1 and 0.4.0.",
+  "cvss_vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+  "cwe_ids": [
+    "CWE-212",
+    "CWE-201"
+  ],
+  "vulnerabilities": [
+    {
+      "package": {
+        "ecosystem": "swift",
+        "name": "github.com/dotcomjack/grux"
+      },
+      "vulnerable_version_range": "= 0.3.1",
+      "patched_versions": "0.5.0"
+    }
+  ]
+}

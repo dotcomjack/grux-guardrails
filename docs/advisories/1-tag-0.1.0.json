@@ -1,0 +1,20 @@
+{
+  "summary": "Grux 0.1.0 passes private key bodies to the model and ships a forgeable prompt injection fence",
+  "description": "**Description**\n\nThe first release ships two critical defects in the two controls the library exists to\nprovide.\n\n**1. `SecretRedactor` matched only the `BEGIN` line of a PEM block.** It replaced that\nheader, tagged the result as redacted, and then passed the entire private key body through\nto the model. The output looks redacted, which is what makes it dangerous: a caller\ninspecting the transcript sees a `[REDACTED:PEM]` marker sitting directly above the key it\nwas supposed to remove.\n\n**2. `wrapAsUntrusted` closed the fence with a fixed literal.** Any untrusted text\ncontaining `</untrusted_data>` closed the fence itself, and everything after it read as\noperator instructions. Since the fence exists specifically to stop a fetched web page from\naddressing the agent, this is a complete failure of the control: a page can end the\nuntrusted block and issue instructions in the operator's voice.\n\nThe denylist also failed open on any entry with a trailing dot.\n\nSeparately, and not a security defect, 0.1.0 destroyed ordinary text: `task-management-system`\ncame out as `ta[REDACTED:OPENAI_KEY]`.\n\n**Impact**\n\nAny private key that passes through `SecretRedactor` reaches the model provider in full and\nlands in whatever logs the transcript touches. Any web page, file or tool output the agent\nreads can escape the untrusted fence and steer the agent, bounded only by the tools that\nagent holds. A denylist entry with a trailing dot silently blocks nothing.\n\nThe headline vector scores the fence forgery, the worse of the two, at `C:L/I:H` because\ninjected operator instructions compromise the integrity of the agent's actions. The PEM\nbody leak scored on its own is `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N`, 8.6 High.\n\n**Patches**\n\nBoth were fixed in 0.2.0. **Do not move to 0.2.0**: it leaks the AWS secret access key and\nintroduces a denial of service. Move to **0.5.0**.\n\n**Workarounds**\n\nNone. Both defects are in the controls themselves.\n\n**References**\n\n`CHANGELOG.md` section 0.1.0.",
+  "cvss_vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:H/A:N",
+  "cwe_ids": [
+    "CWE-74",
+    "CWE-212",
+    "CWE-201"
+  ],
+  "vulnerabilities": [
+    {
+      "package": {
+        "ecosystem": "swift",
+        "name": "github.com/dotcomjack/grux"
+      },
+      "vulnerable_version_range": "= 0.1.0",
+      "patched_versions": "0.5.0"
+    }
+  ]
+}

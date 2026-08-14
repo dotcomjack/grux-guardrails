@@ -33,3 +33,12 @@ contact_links:
       Written as a narrative, and it records the wrong first attempts as well as the
       fixes. Several defects are already pinned by testKnownDefect tests in
       Tests/GruxTests/AdversarialRound2Tests.swift.
+
+  # A question is not a defect, and answering it in the tracker leaves it closed and
+  # unfindable. Discussions is where "how do I wire the redirect delegate" belongs.
+  - name: Just a question? Ask in Discussions
+    url: https://github.com/dotcomjack/grux/discussions/categories/q-a
+    about: >-
+      How to wire it in, what a tag means, whether a case is covered. Questions get
+      answered and stay searchable there, rather than being closed in the tracker. If the
+      answer turns out to be a bug, it becomes an issue from there.

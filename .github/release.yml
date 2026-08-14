@@ -1,0 +1,58 @@
+# Shapes GitHub's auto-generated release notes.
+#
+# This file does not write the release body. Every release in this repository is written by
+# hand from CHANGELOG.md and lives under .github/release-notes/, because a list of merged
+# pull request titles is not a disclosure. What this file does is shape the "generate
+# release notes" button so that the generated block, when it is used as raw material for a
+# hand-written body, arrives already grouped by what a reader of a security library cares
+# about: what leaked, what stopped being caught, and what broke.
+#
+# It only pays once labelled pull requests start arriving, which on a solo repository is
+# after launch rather than before it.
+#
+# Order matters. A pull request lands in the FIRST category whose label list it matches, so
+# the security categories sit above the generic ones deliberately.
+
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+    authors:
+      - dependabot
+      - github-actions
+
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking
+
+    - title: Leaks closed
+      labels:
+        - bypass
+
+    - title: False positives fixed
+      labels:
+        - false-positive
+
+    - title: New patterns and URL cases
+      labels:
+        - pattern-request
+
+    - title: Other fixes
+      labels:
+        - bug
+
+    - title: Features
+      labels:
+        - enhancement
+
+    - title: Documentation
+      labels:
+        - documentation
+
+    # Anything not matched above. Keep this last and keep it present: without a catch-all,
+    # a pull request carrying no label vanishes from the generated notes entirely, which is
+    # the failure mode this file exists to avoid rather than create.
+    - title: Everything else
+      labels:
+        - "*"
