@@ -134,8 +134,11 @@ same commit, and say so in the pull request. Do not leave it behind "just in cas
 
 Where correctness is statistical, the measured value gets printed and the guard is set
 just above it, so a real regression trips while sampling noise does not. The bare
-40-character credential leak rate is measured at roughly 1.3% over 20,000 trials and
-`testBareCredentialLeakRateIsPublished` asserts under 2.0%. Moving a threshold to make a
+40-character credential leak rate is measured at roughly 0.85% over 20,000 trials, observed
+between 0.78% and 0.97% across runs, and `testBareCredentialLeakRateIsPublished` asserts
+under 2.0%. That guard is looser than this rule asks for: it sits about 18 sampling
+deviations above the mean, so the rate could more than double before it trips. It is
+written down here as a known gap rather than quietly narrowed. Moving a threshold to make a
 run pass is a change to the claim the library makes, so it needs its own line in the
 CHANGELOG and its own justification. Silently widening a bound is the one review comment
 that will not be negotiated.
