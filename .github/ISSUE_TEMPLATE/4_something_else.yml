@@ -1,0 +1,60 @@
+name: Something else
+description: Build failure, resolution problem, documentation error, API question, roadmap.
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Blank issues are off, so this is the catch-all. Anything that is not a bypass, a
+        false positive or a pattern request belongs here.
+
+        Two things worth checking first, because they are the most common:
+
+        - **`the library 'YourAgent' requires macos 10.13, but depends on the product
+          'Grux' which requires macos 14.0`.** Your own manifest needs
+          `platforms: [.macOS(.v14)]`. That line is not optional. The README Install
+          section has the whole file to copy.
+        - **`swift test` fails to compile on Linux.** Known and expected. Three sites in
+          `AdversarialRound2Tests.swift` use `XCTExpectFailure`, which ships with Apple's
+          XCTest and not with swift-corelibs-xctest. `swift build` works there; the suite
+          needs macOS.
+
+  - type: checkboxes
+    id: routing
+    attributes:
+      label: Routing
+      options:
+        - label: This is not a secret surviving redact, and not a URL that URLGuard allowed which reaches a private address. Those go to the private channel in SECURITY.md.
+          required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Paste the exact error or output rather than describing it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >-
+        For a resolution or build problem, the relevant part of your Package.swift is
+        usually the whole answer.
+      render: swift
+
+  - type: input
+    id: version
+    attributes:
+      label: Grux version, macOS version, Swift version
+      placeholder: "0.6.1, macOS 14.6, Swift 5.9"
+    validations:
+      required: true

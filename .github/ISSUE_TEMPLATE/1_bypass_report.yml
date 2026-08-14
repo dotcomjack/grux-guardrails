@@ -1,0 +1,103 @@
+name: Bypass, already disclosed privately
+description: Track a bypass of SecretRedactor or URLGuard that has already gone through the private channel, or that is already public.
+title: "[bypass] "
+labels: ["bypass", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Stop, if this bypass is new
+
+        A secret that survives `SecretRedactor.redact`, or a URL that
+        `URLGuard.evaluate` allows and that reaches a private address, cloud metadata or
+        loopback, is a vulnerability. It goes to a private channel first, not here:
+
+        - [Report a vulnerability privately](https://github.com/dotcomjack/grux/security/advisories/new)
+        - Email `security@gruxai.com`, subject `Grux security`
+
+        This form is for the case where that has already happened and the bypass is being
+        tracked in the open, or where it is already public because the README, the
+        CHANGELOG or a `testKnownDefect` test already describes it.
+
+        Everything you paste here is public and permanent. Use synthetic credentials.
+
+  - type: checkboxes
+    id: routing
+    attributes:
+      label: Routing
+      options:
+        - label: This bypass is already disclosed privately, or it is already documented in public (README, CHANGELOG, or an existing testKnownDefect test).
+          required: true
+        - label: Every credential-shaped string below is synthetic. I have not pasted a real key, not even a revoked one.
+          required: true
+
+  - type: dropdown
+    id: entry_point
+    attributes:
+      label: Which entry point
+      options:
+        - SecretRedactor.redact, a secret survived
+        - URLGuard.evaluate, a URL was allowed that should have been denied
+        - URLGuard.evaluate, the decision was right but the audit tag was wrong
+        - Either entry point crashed
+    validations:
+      required: true
+
+  - type: textarea
+    id: input
+    attributes:
+      label: The exact input
+      description: >-
+        Byte for byte, including leading whitespace, quoting and line breaks. Spelling is
+        where every real leak in this library has come from, so an approximation is not
+        usable. If a non-ASCII character is load-bearing, name it as a code point too, for
+        example U+FF0E.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What came back
+      description: The exact return value.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have come back, and why
+      description: >-
+        For a redaction miss, name the substring that must not survive. For a URL
+        decision, name the address it actually reaches and the tag you expected
+        (PRIVATE_NETWORK, HOST_SMUGGLING, CREDENTIAL_URL, USER_DENYLIST, BAD_SCHEME,
+        URL_DENIED).
+    validations:
+      required: true
+
+  - type: textarea
+    id: failing_test
+    attributes:
+      label: A failing test case
+      description: >-
+        The fastest possible path to a fix, and the only artifact that survives into the
+        suite. Tables are the house style, so a row is enough. See
+        Tests/GruxTests/Corpus.swift for the shape.
+      render: swift
+
+  - type: input
+    id: version
+    attributes:
+      label: Grux version
+      description: The tag or commit you observed this on.
+      placeholder: "0.6.1"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: macOS and Swift version
+      placeholder: "macOS 14.6, Swift 5.9"

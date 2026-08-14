@@ -1,0 +1,75 @@
+name: Pattern request, a credential format nothing covers
+description: Ask for a new provider prefix or credential shape to be matched.
+title: "[pattern] "
+labels: ["pattern-request", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `SecretRedactor` is a matcher, so a credential in a format no pattern covers
+        passes through by construction. SECURITY.md names that as a documented limit
+        rather than a finding, which is exactly why this lane exists instead of the
+        private one.
+
+        **The counter-cases are not optional.** Every pattern that catches more also
+        destroys more, and this library has shipped both failure modes. A request with
+        only positive examples cannot be accepted, because there is no way to tell
+        whether the pattern would eat ordinary text. Recent additions of this shape:
+        `dckr_pat_` and `lin_api_` in 0.6.1.
+
+        Use synthetic values. Never paste a real key, not even a revoked one.
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider or format
+      placeholder: "Fly.io deploy tokens, or RFC 9068 JWTs, or an internal shape"
+    validations:
+      required: true
+
+  - type: input
+    id: docs
+    attributes:
+      label: Public documentation for the format
+      description: >-
+        A link that states the prefix, the alphabet and the length. Without it the
+        pattern is a guess, and a guessed length is what makes a matcher both leaky and
+        destructive at the same time.
+    validations:
+      required: true
+
+  - type: textarea
+    id: positive
+    attributes:
+      label: Synthetic examples that must be redacted
+      description: >-
+        Two or three, and vary the spelling around them the way real text does: bare, in
+        an env assignment, in JSON, in an Authorization header. Spelling is where every
+        real leak here has come from.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: negative
+    attributes:
+      label: Counter-cases that must NOT be redacted
+      description: >-
+        Ordinary text that looks similar. A public identifier sharing the prefix, a
+        documentation placeholder, a filename or a hash of comparable length and
+        alphabet. This is the half that decides whether the pattern is safe.
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: shape
+    attributes:
+      label: About the shape
+      options:
+        - label: The prefix is unique enough that matching it will not catch unrelated strings.
+          required: false
+        - label: The length is fixed, or has a stated minimum.
+          required: false
+        - label: Every value above is synthetic.
+          required: true

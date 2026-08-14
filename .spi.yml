@@ -1,0 +1,21 @@
+# Swift Package Index manifest, read by SwiftPackageIndex/SPIManifest.
+#
+# Deliberately kept under 1000 bytes. The current parser allows 1500, but the 0.x
+# line enforced 1000, and an oversized or undecodable manifest is ignored in
+# silence: no documentation, no error, nothing to notice. Only version,
+# metadata, builder and external_links are valid at the top level.
+version: 1
+
+metadata:
+  # authors is a String, not a list. A YAML sequence here fails to decode Metadata,
+  # which fails the whole file. Without this line SPI infers the author from git
+  # history, which reads "DCJ".
+  authors: Jack Brandt
+
+builder:
+  configs:
+    # Hosts DocC for the Grux target and puts a Documentation link in the package
+    # sidebar. No swift-docc-plugin dependency needed, SPI injects it when the
+    # manifest has none. Lands on the generated symbol index rather than a written
+    # landing page, which would need a DocC catalog under the tagged Sources/ tree.
+    - documentation_targets: [Grux]

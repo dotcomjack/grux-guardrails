@@ -1,0 +1,8 @@
+# One person, two names, one address. Git history carries both "DCJ" and
+# "Jack Brandt" against jack@dotcomjack.com, so `git shortlog -sn` reports two
+# contributors and the Swift Package Index would headline the acronym as the
+# author of a security library.
+#
+# Because both spellings share the same commit address, the single name form is
+# enough. The two address mapping form is not needed here.
+Jack Brandt <jack@dotcomjack.com>

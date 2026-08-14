@@ -5,10 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege for GITHUB_TOKEN. Neither job writes anything back to the repository,
+# so read access to the contents is the whole requirement. Without this block both jobs
+# inherit the repository default, which is broader than either one needs.
+permissions:
+  contents: read
+
 jobs:
   test:
-    # Package.swift declares .macOS(.v13), so CI has to run the DECLARED MINIMUM and not
-    # only the newest runner. This matters more here than it would in most packages:
+    # Package.swift declares .macOS(.v14), so macos-14 IS the declared minimum and CI has
+    # to run it rather than only the newest runner. This matters more here than it would
+    # in most packages:
     # testEveryUnicodeSpellingOfALoopbackHostIsDenied defends against a loopback SSRF
     # bypass, and its own comment says the only thing standing between this library and
     # that bypass is a Foundation implementation detail. macOS 15 ships the rewritten
@@ -19,22 +26,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-13 is DELIBERATELY ABSENT. It was added here on 2026-08-13 to test the
-        # declared minimum, and it never scheduled: 31 minutes queued while 14 and 15
-        # finished in about 2, and it held BOTH runs in "queued" so CI could never reach a
-        # conclusion at all. GitHub is retiring the macOS 13 Intel hosted runner. A leg
-        # that can never report is not coverage, it just looks like coverage on the checks
-        # page, which is worse than no leg.
+        # macos-13 is DELIBERATELY ABSENT, do not add it back. It was added here on
+        # 2026-08-13 to test the minimum declared at the time, and it never scheduled:
+        # 31 minutes queued while 14 and 15 finished in about 2, and it held BOTH runs
+        # in "queued" so CI could never reach a conclusion at all. GitHub is retiring
+        # the macOS 13 Intel hosted runner. A leg that can never report is not
+        # coverage, it just looks like coverage on the checks page, which is worse than
+        # no leg.
         #
-        # So the homograph loopback defence in testEveryUnicodeSpellingOfALoopbackHostIsDenied
-        # is PROVEN on 14 and 15 and UNVERIFIED on 13, which the package still declares as
-        # its minimum. macOS 14 passing is real evidence, since 14 ships the same older
-        # Foundation URL parser the concern was about. Resolving that claim properly is
-        # either raising the platform to .macOS(.v14) or normalising alternate dot
-        # characters inside URLGuard instead of trusting Foundation, and both ship as 0.6.1.
+        # That left the homograph loopback defence in
+        # testEveryUnicodeSpellingOfALoopbackHostIsDenied proven on 14 and 15 and
+        # unverified on 13, while the package still declared 13 as its minimum. 0.6.1
+        # closed that gap from the other end by raising the floor to .macOS(.v14), so
+        # the declared minimum is now macos-14 and this matrix covers it head on. The
+        # question is settled, not outstanding.
         os: [macos-14, macos-15]
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to a full commit SHA, not the v4 tag. A tag is mutable and can be
+      # repointed by whoever controls the action repository, which makes it a supply
+      # chain hole in a package that argues for guardrails. The trailing comment is the
+      # human readable version the SHA corresponds to, so this stays maintainable.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Build
         run: swift build -v
       - name: Test
@@ -43,7 +55,7 @@ jobs:
   house-style:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       # Em dashes and en dashes are banned in this repo, including in comments and
       # docs. Cheap to check, annoying to fix after the fact.
       - name: No em dashes or en dashes
