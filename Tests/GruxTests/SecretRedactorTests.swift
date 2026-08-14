@@ -465,71 +465,254 @@ final class SecretRedactorTests: XCTestCase {
     ///
     /// Reads the real file, like the pattern-count and tag-table tests, because a copy
     /// drifts and a mirror test that mirrors nothing is decoration.
+    ///
+    /// The SELECTION RULE is the part that had to change, and it is the whole defect. An
+    /// earlier version filtered blocks on `let package = Package(`, so it saw the
+    /// WHOLE-MANIFEST example and nothing else. The PRIMARY install snippet is a bare
+    /// `.package(url:from:)` beside a `.product(name:)` and is not a manifest, so its
+    /// product-and-version coherence went unchecked, and that snippet is the line most
+    /// readers copy. A comment at the foot of the old body RECORDED that hole instead of
+    /// closing it, and a partial patch checked the `.package(url:)` half by scanning raw
+    /// lines while the `.product(name:)` half stayed invisible.
+    ///
+    /// Now every fenced swift block that names either call is checked wherever it sits,
+    /// selected by what the block DOES rather than by where it is or how it opens. Nothing
+    /// here pins a line number or a section heading, so moving, splitting, reordering or
+    /// rewriting the README cannot quietly drop a snippet out of coverage.
+    ///
+    /// The name is kept as it was because CHANGELOG 0.6.0 cites it by name and a changelog
+    /// is a historical record.
+    /// The controls live in this same function rather than in a second one on purpose.
+    /// The count of test functions in this directory is a claim the README makes in three
+    /// places, and CODEOWNERS, the CHANGELOG and the 0.6.1 release note repeat it, so
+    /// adding a function here silently falsifies six statements in four files this shard
+    /// does not own. The coverage is identical either way, so the cheaper shape wins.
+    ///
+    /// The README counts them with a grep for the declaration keyword, which counts raw
+    /// occurrences rather than declarations, so spelling that keyword out in a comment
+    /// moves the number too. That is why this paragraph talks around it.
     func testEveryManifestInTheReadmeIsPasteable() throws {
-        let readme = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("README.md"),
-            encoding: .utf8)
-        // Any fenced swift block that declares a Package is a manifest a reader may paste.
+        // POSITIVE CONTROL first, because a check nobody has watched fail is not evidence.
+        //
+        // The live check cannot be mutation-proved by breaking README.md, since the README
+        // is a shipped surface and vandalising it to prove a test works is worse than the
+        // test. So the rules are a pure function over text and this drives them with
+        // deliberately broken READMEs. Every case below is a drift that has already
+        // happened here or is one edit away, and each must be REPORTED.
+        //
+        // The second case is the exact miss that motivated the rewrite: a bare install
+        // snippet, no manifest anywhere near it, asking for the `Grux` product at a version
+        // that only ever shipped `GruxKit`. The old selection rule could not see it.
+        let goodPrimary = """
+        ```swift
+        // Package.swift
+        .package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")
+        .product(name: "Grux", package: "grux")
+        // then, in your source
+        import Grux
+        ```
+        """
+        let goodManifest = """
+        ```swift
+        // swift-tools-version: 5.9
+        import PackageDescription
+
+        let package = Package(
+            name: "YourAgent",
+            platforms: [.macOS(.v14)],
+            dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")],
+            targets: [.target(name: "YourAgent",
+                              dependencies: [.product(name: "Grux", package: "grux")])]
+        )
+        ```
+        """
+
+        let cases: [(String, String, String)] = [
+            ("primary snippet points at the wrong repository",
+             goodPrimary.replacingOccurrences(of: "dotcomjack/grux.git", with: "someoneelse/grux.git")
+                 + "\n" + goodManifest,
+             "repository"),
+            ("primary snippet asks for Grux at a GruxKit-only version",
+             goodPrimary.replacingOccurrences(of: "0.6.1", with: "0.5.0") + "\n" + goodManifest,
+             "only ships GruxKit"),
+            ("primary snippet asks for GruxKit at a post-rename version",
+             goodPrimary.replacingOccurrences(of: "\"Grux\", package:", with: "\"GruxKit\", package:")
+                 .replacingOccurrences(of: "import Grux", with: "import GruxKit")
+                 + "\n" + goodManifest,
+             "renamed it to Grux"),
+            ("primary snippet admits a tag that leaks credentials",
+             goodPrimary.replacingOccurrences(of: "0.6.1", with: "0.3.1") + "\n" + goodManifest,
+             "leak credentials"),
+            ("manifest has no tools-version pragma",
+             goodPrimary + "\n"
+                 + goodManifest.replacingOccurrences(of: "// swift-tools-version: 5.9", with: ""),
+             "tools-version"),
+            ("manifest never imports PackageDescription",
+             goodPrimary + "\n"
+                 + goodManifest.replacingOccurrences(of: "import PackageDescription", with: ""),
+             "PackageDescription"),
+            ("manifest omits platforms",
+             goodPrimary + "\n"
+                 + goodManifest.replacingOccurrences(of: "platforms: [.macOS(.v14)],", with: ""),
+             "omits platforms"),
+            ("an install call sits in prose where the block scan cannot reach it",
+             goodPrimary + "\n" + goodManifest
+                 + "\n\nOr add `.package(url: \"https://github.com/dotcomjack/grux.git\", "
+                 + "from: \"0.6.1\")` to your own manifest.\n",
+             "outside any fenced swift block"),
+            ("the whole-manifest example disappeared",
+             goodPrimary,
+             "vacuous"),
+            ("no install snippet survives at all",
+             "# Grux\n\nNo code here.\n",
+             "stopped testing"),
+        ]
+        for (note, text, expected) in cases {
+            let problems = Self.installProblems(inReadme: text)
+            XCTAssertTrue(problems.contains { $0.contains(expected) },
+                          "the checker missed \(note), it reported: \(problems)")
+        }
+
+        // Negative control. A checker that reports on everything reports nothing.
+        XCTAssertEqual(Self.installProblems(inReadme: goodPrimary + "\n" + goodManifest), [],
+                       "the checker fired on a correct README, so every case above is noise")
+
+        // The measurement itself, against the real file.
+        let readme = try String(contentsOf: Self.readmeURL, encoding: .utf8)
+        let problems = Self.installProblems(inReadme: readme)
+        XCTAssertTrue(problems.isEmpty,
+                      "the README install snippets have drifted:\n  "
+                      + problems.joined(separator: "\n  "))
+    }
+
+    /// Where the README lives. A property rather than an expression inline in the test so
+    /// a mutation proof can aim it at a scratch copy with a one-line edit, instead of
+    /// editing the real README to find out whether the check is wired up.
+    private static var readmeURL: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("README.md")
+    }
+
+    /// Every quoted value that follows `marker`, in order of appearance.
+    private static func quotedValues(after marker: String, in text: String) -> [String] {
+        var found: [String] = []
+        var rest = Substring(text)
+        while let hit = rest.range(of: marker) {
+            rest = rest[hit.upperBound...]
+            guard let close = rest.firstIndex(of: "\"") else { break }
+            found.append(String(rest[..<close]))
+            rest = rest[rest.index(after: close)...]
+        }
+        return found
+    }
+
+    /// A dotted version as one comparable integer, so the rules below survive the next tag
+    /// instead of hard coding the two bad numbers of the day. A literal blocklist of
+    /// "0.4.0" and "0.5.0" is stale the moment somebody types 0.3.1.
+    private static func versionOrder(_ text: String) -> Int {
+        let parts = text.split(separator: ".").map { Int($0) ?? 0 }
+        let major = parts.count > 0 ? parts[0] : 0
+        let minor = parts.count > 1 ? parts[1] : 0
+        let patch = parts.count > 2 ? parts[2] : 0
+        return major * 1_000_000 + minor * 1_000 + patch
+    }
+
+    /// Everything wrong with the README's install snippets, as a list of problems.
+    ///
+    /// Pure, and takes the text rather than reading the file, so it can be driven with a
+    /// broken README by the positive control above. A checker nobody has watched fail is a
+    /// checker nobody has evidence about.
+    private static func installProblems(inReadme readme: String) -> [String] {
+        // Facts about the tag list, not about the README, which is why they live here:
+        // 0.5.0 is the first tag that does not leak credentials, and 0.6.0 is the tag that
+        // renamed the product from GruxKit to Grux.
+        let firstCleanTag = versionOrder("0.5.0")
+        let renameTag = versionOrder("0.6.0")
+
         let blocks = readme.components(separatedBy: "```swift")
             .dropFirst()
             .compactMap { $0.components(separatedBy: "```").first }
-            .filter { $0.contains("let package = Package(") }
-        XCTAssertFalse(blocks.isEmpty, "no manifest block found, this test has stopped testing")
-        for block in blocks {
-            XCTAssertTrue(block.contains("// swift-tools-version:"),
-                          "a manifest block has no tools-version pragma, so pasting it fails "
-                          + "with a Swift 3.1.0 error that names nothing real:\n\(block)")
-            XCTAssertTrue(block.contains("import PackageDescription"),
-                          "a manifest block never imports PackageDescription:\n\(block)")
-            XCTAssertTrue(block.contains("platforms:"),
-                          "a manifest block omits platforms, which is the exact thing that "
-                          + "stopped a consumer building:\n\(block)")
 
-            // Added after a review caught the whole-manifest block still saying
-            // from: "0.5.0" beside .product(name: "Grux"), while the primary install
-            // snippet three sections above had been updated to 0.6.0. Pasteable is not
-            // the same as coherent: every check above passed on that block. The product
-            // name and the lowest version the constraint admits have to agree, because
-            // 0.5.0 and earlier declare the product as GruxKit.
-            if block.contains("\"Grux\", package:") || block.contains("product(name: \"Grux\"") {
-                XCTAssertFalse(block.contains("0.5.0") || block.contains("0.4.0"),
-                               "a manifest block asks for the Grux product while admitting a "
-                               + "version that only ships GruxKit:\n\(block)")
+        // Selected by what a block DOES, not by whether it happens to be a whole manifest.
+        // Either call is something a reader pastes into their own project.
+        let installBlocks = blocks.filter {
+            $0.contains(".package(url:") || $0.contains(".product(name:")
+        }
+        guard !installBlocks.isEmpty else {
+            return ["no fenced swift block names .package(url: or .product(name:, so this "
+                    + "check has stopped testing"]
+        }
+
+        var problems: [String] = []
+        if !installBlocks.contains(where: { $0.contains("let package = Package(") }) {
+            problems.append("no whole-manifest example remains, so the pasteability rules "
+                            + "are vacuous")
+        }
+
+        // Coverage guard. Everything below reads fenced swift blocks, so an install call
+        // written in prose, or inside a plain fence with no `swift` tag, is invisible to
+        // it and would be a silent gap rather than a failure. Counting both ways is what
+        // turns that into a reported problem, and it is the same class of hole this whole
+        // rewrite exists to close.
+        for marker in [".package(url:", ".product(name:"] {
+            let everywhere = readme.components(separatedBy: marker).count - 1
+            let reachable = installBlocks.reduce(0) {
+                $0 + $1.components(separatedBy: marker).count - 1
             }
-            if block.contains("GruxKit") {
-                XCTAssertFalse(block.contains("0.6.0"),
-                               "a manifest block asks for the GruxKit product at a version "
-                               + "that renamed it to Grux:\n\(block)")
+            if everywhere > reachable {
+                problems.append("\(everywhere - reachable) occurrence(s) of \(marker) sit "
+                                + "outside any fenced swift block, so nothing checks them")
             }
         }
 
-        // The loop above only sees blocks containing `let package = Package(`, which is the
-        // WHOLE-MANIFEST example. The PRIMARY install snippet is a bare one-line
-        // .package(url:from:) and is not a manifest, so it was never checked, and the
-        // primary snippet is the line most readers actually copy. That is the mirror image
-        // of the drift this check was added for: last time the whole manifest went stale
-        // while the primary snippet was correct, and nothing here would have caught the
-        // reverse.
-        //
-        // So check every .package(url:) line in the file, wherever it lives, and require
-        // that the URL and the version floor agree with each other and with the module the
-        // README tells people to import.
-        let packageLines = readme
-            .split(separator: "\n")
-            .map(String.init)
-            .filter { $0.contains(".package(url:") }
-        XCTAssertFalse(packageLines.isEmpty,
-                       "no .package(url:) line found in README, this check has stopped testing")
-        for line in packageLines {
-            XCTAssertTrue(line.contains("dotcomjack/grux.git"),
-                          "a README install line points somewhere other than the real "
-                          + "repository:\n\(line)")
-            XCTAssertFalse(line.contains("0.5.0") || line.contains("0.4.0"),
-                           "a README install line admits a version that predates the Grux "
-                           + "rename, so `import Grux` cannot resolve from it:\n\(line)")
+        for block in installBlocks {
+            let shown = block.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            for url in quotedValues(after: ".package(url: \"", in: block)
+            where !url.contains("dotcomjack/grux.git") {
+                problems.append("an install snippet points somewhere other than the real "
+                                + "repository (\(url)):\n\(shown)")
+            }
+
+            // GruxKit is tested first because `import Grux` is a prefix of `import GruxKit`,
+            // so asking the other question first misreads every GruxKit snippet.
+            let namesGruxKit = block.contains("GruxKit")
+            let namesGrux = !namesGruxKit
+                && (block.contains("product(name: \"Grux\"") || block.contains("import Grux"))
+
+            for floor in quotedValues(after: "from: \"", in: block) {
+                let order = versionOrder(floor)
+                if order < firstCleanTag {
+                    problems.append("an install snippet admits \(floor), one of the six tags "
+                                    + "that leak credentials:\n\(shown)")
+                }
+                if namesGrux && order < renameTag {
+                    problems.append("an install snippet asks for the Grux product while "
+                                    + "admitting \(floor), a version that only ships "
+                                    + "GruxKit:\n\(shown)")
+                }
+                if namesGruxKit && order >= renameTag {
+                    problems.append("an install snippet asks for the GruxKit product at "
+                                    + "\(floor), a version that renamed it to Grux:\n\(shown)")
+                }
+            }
+
+            guard block.contains("let package = Package(") else { continue }
+            if !block.contains("// swift-tools-version:") {
+                problems.append("a manifest block has no tools-version pragma, so pasting it "
+                                + "fails with a Swift 3.1.0 error that names nothing "
+                                + "real:\n\(shown)")
+            }
+            if !block.contains("import PackageDescription") {
+                problems.append("a manifest block never imports PackageDescription:\n\(shown)")
+            }
+            if !block.contains("platforms:") {
+                problems.append("a manifest block omits platforms, which is the exact thing "
+                                + "that stopped a consumer building:\n\(shown)")
+            }
         }
+        return problems
     }
 
     /// Regression. The 32-character floor caught ordinary long identifiers. 40 is the

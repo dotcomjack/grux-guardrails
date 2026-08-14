@@ -1,0 +1,19 @@
+{
+  "summary": "Grux 0.3.0 path heuristic discards 14 percent of AWS secret access keys, and allows a NAT64 route to loopback",
+  "description": "**Description**\n\n0.3.0 fixed the 0.2.x base64 blindness by excluding file paths structurally instead of by\nalphabet. The new rule rejected any token with a segment under four characters. Base64\nproduces short segments by chance, so the rule threw away real keys.\n\n**Measured over 200,000 random AWS secret access keys, the heuristic discarded 14% of them,\nrising to 34% at session-token length.** Discarded here means the token was judged to be a\nfile path and passed through unredacted.\n\nThis is a probabilistic leak and that is what makes it hard to catch: the same code redacts\nthe key you test with and releases the key you deploy with. A test suite with a handful of\nfixtures will be green.\n\n**0.3.0 also allows `64:ff9b:1::` straight to loopback.** RFC 8215 reserves that `/48` for\nNAT64 local use, and `URLGuard` read the embedded IPv4 at only one of the six positions RFC\n6052 defines, so an address carrying loopback at a different position was allowed through.\n\n**Impact**\n\nRoughly one AWS secret access key in seven reaches the model provider in full, and roughly\none session token in three. Neither the caller nor the transcript gives any signal that it\nhappened, because the other six in seven are redacted correctly.\n\nThe NAT64 hole is a server-side request forgery against `URLGuard`: an agent handed a\ncrafted IPv6 URL reaches loopback services on the host that the guard exists to deny. Scored\non its own that is `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N`, 9.3 Critical.\n\n**Patches**\n\nThe path heuristic was rewritten in 0.4.0 to require two independent signals, taking the\nlabelled form `AWS_SECRET_ACCESS_KEY=...` to 0%. **A bare 40-character key with no label\nstill leaks at about 1.5% in 0.4.0**, measured over 20,000 samples, and about 0.875% in\n0.5.0. This is a known, published limitation and not a defect the project claims to have\nclosed.\n\n0.3.1 fixed one NAT64 input. It was not fully fixed until 0.5.0, which checks all six RFC\n6052 positions.\n\nMove to **0.5.0**.\n\n**Workarounds**\n\nLabel your secrets. The labelled form `AWS_SECRET_ACCESS_KEY=...` is redacted by name from\n0.4.0 onward regardless of the value's shape. This does not help on 0.3.0 or 0.3.1.\n\n**References**\n\n`CHANGELOG.md` sections 0.3.0, 0.4.0, and the seventh audit under 0.5.0.",
+  "cvss_vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+  "cwe_ids": [
+    "CWE-212",
+    "CWE-918"
+  ],
+  "vulnerabilities": [
+    {
+      "package": {
+        "ecosystem": "swift",
+        "name": "github.com/dotcomjack/grux"
+      },
+      "vulnerable_version_range": ">= 0.3.0, <= 0.4.0",
+      "patched_versions": "0.5.0"
+    }
+  ]
+}

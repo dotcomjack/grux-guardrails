@@ -1,0 +1,21 @@
+{
+  "summary": "Grux 0.2.1 leaks the AWS secret access key, leaks the PEM tail, and generates guessable fence identifiers",
+  "description": "**Description**\n\n0.2.1 fixed only the denial of service from 0.2.0. **It still leaks the AWS secret access\nkey**, and it carries four further defects that 0.3.0 later characterised as regressions\nintroduced by the 0.2.x security fixes.\n\n- **The AWS secret access key still leaks in full**, by the base64 blindness described in\n  Advisory 2. This is the reason 0.2.1 must not be used, and it is stated plainly in its own\n  changelog entry.\n- **A single non-ASCII character made redaction quadratic.** One curly apostrophe took 296KB\n  from 0.030s to 1.970s, because converting `NSRange` to a Swift `String` range is O(n) on\n  non-ASCII input.\n- **The PEM tail leaked.** Body lines required 16 or more characters and a real key's final\n  base64 line is often shorter, so the last quantum survived while the block was stamped as\n  redacted. Same shape as the 0.1.0 defect: the marker says redacted and part of the key is\n  still there.\n- **Fence identifiers were silently weakened.** A caller label was filtered down to its hex\n  characters, so `screen-capture` became `id=\"ceecae\"`, six guessable characters. An attacker\n  who guesses the identifier can close the fence, which reopens the 0.1.0 injection.\n- **`tag()` missed the newest denials**, so Oracle Cloud metadata reported as `URL_DENIED`\n  and any alert keyed on `PRIVATE_NETWORK` stopped seeing it. `README.md` tells you to alert\n  on that tag.\n- **The denylist failed open for internationalized domains.** `URL.host` is punycode and\n  entries were compared raw, so an IDN entry matched nothing. Blank entries could also match.\n\n**Impact**\n\nFull AWS credential disclosure to the model provider, plus a partial private key leak\nunderneath a redaction marker. The six-character fence identifier is brute-forceable, which\nrestores prompt injection against a caller who believed the fence was keyed. The IDN\ndenylist failure means an operator's own blocklist silently permits the host it names, and\nthe tag gap means the alert meant to catch that is blind.\n\n**Patches**\n\nAll fixed in 0.3.0. **Do not move to 0.3.0**: its new path heuristic discards 14% of AWS\nsecret access keys. Move to **0.5.0**.\n\n**Breaking change on upgrade**: from 0.3.0, fence identifiers under 16 hex characters are\nhashed rather than used verbatim.\n\n**Workarounds**\n\nNone.\n\n**References**\n\n`CHANGELOG.md` sections 0.2.1 and 0.3.0.",
+  "cvss_vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+  "cwe_ids": [
+    "CWE-212",
+    "CWE-331",
+    "CWE-636",
+    "CWE-778"
+  ],
+  "vulnerabilities": [
+    {
+      "package": {
+        "ecosystem": "swift",
+        "name": "github.com/dotcomjack/grux"
+      },
+      "vulnerable_version_range": ">= 0.2.0, <= 0.2.1",
+      "patched_versions": "0.5.0"
+    }
+  ]
+}

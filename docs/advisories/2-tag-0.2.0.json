@@ -1,0 +1,19 @@
+{
+  "summary": "Grux 0.2.0 leaks the AWS secret access key in full and is quadratic on attacker-chosen input",
+  "description": "**Description**\n\n0.2.0 fixed the two 0.1.0 criticals and introduced two defects of its own.\n\n**1. Base64 blindness leaks the AWS secret access key.** `/` was dropped from the entropy\nalphabet to stop file paths being destroyed. Standard base64 is `A-Za-z0-9+/`, so removing\n`/` also removed it from base64, and an AWS secret access key containing `/` went out in\nfull. This is the canonical example, not the only one: any base64 credential carrying a `/`\nis affected.\n\n**2. A quadratic scan on hostile input.** The PEM pattern's lazy scan meant every `BEGIN`\nmarker rescanned the rest of the document. **1.2MB of hostile input took 72 seconds.**\n\n0.2.0 also carries the defects listed under Advisory 3, which apply to the whole 0.2.x line.\n\n**Impact**\n\nAn AWS secret access key present in text handed to `SecretRedactor` reaches the model\nprovider verbatim. That is a full credential for the account it belongs to.\n\nSeparately, any caller that redacts attacker-influenced text, which is the intended use, can\nbe stalled by a document full of `BEGIN` markers. Scored on its own that is\n`CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H`, 7.5 High.\n\n**Patches**\n\nThe denial of service was fixed in 0.2.1. The credential leak was fixed in 0.3.0, which\nintroduced a path heuristic that discards 14% of AWS secret access keys, see Advisory 4.\nMove to **0.5.0**.\n\n**Workarounds**\n\nNone.\n\n**References**\n\n`CHANGELOG.md` sections 0.2.0, 0.2.1 and 0.3.0.",
+  "cvss_vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+  "cwe_ids": [
+    "CWE-212",
+    "CWE-1333"
+  ],
+  "vulnerabilities": [
+    {
+      "package": {
+        "ecosystem": "swift",
+        "name": "github.com/dotcomjack/grux"
+      },
+      "vulnerable_version_range": ">= 0.2.0, <= 0.2.1",
+      "patched_versions": "0.5.0"
+    }
+  ]
+}

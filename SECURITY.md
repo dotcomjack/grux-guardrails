@@ -31,8 +31,8 @@ Coordinated disclosure. I will not publish the details of a report before there 
 or we agree there is nothing to fix, and I ask you for the same window. After a fix ships
 I disclose it in full: what got through, which tags were affected, and what the fix
 actually changed. That is not a promise made for this page. Six tags in this repository
-are already published as leaking credentials, in the README and the changelog, with no
-attempt to quietly drop them.
+are already published as leaking credentials, in the README, in the changelog, and in
+`docs/DISCLOSURE-2026-08.md`, with no attempt to quietly drop them.
 
 ## What counts
 
@@ -41,13 +41,24 @@ destroys, since a redactor people switch off protects nothing. Any URL that
 `URLGuard.evaluate` allows and that reaches a private address, cloud metadata, or the
 loopback interface. Anything that crashes either entry point.
 
-**Known and documented, so not a finding.** `URLGuard` does not follow redirects and does
-not resolve DNS, so redirect chains and DNS rebinding are outside what it can see. Both
-are described in the README, along with what to put behind it. `SecretRedactor` is a
-matcher, so a credential in a format no pattern covers passes through by construction.
+**Known and documented, so not a finding.** Each of these is deliberate, and each is
+already written down with the reason, so a report about one will be closed as working as
+intended. The full list with the trust boundaries is `docs/THREAT-MODEL.md`.
 
-If you think one of those documented limits is worse than the README implies, that is
-still worth reporting. The line between a documented limit and a false sense of security
+- `URLGuard` does not follow redirects. It judges one string, so a public URL is free to
+  answer a 302 pointing at loopback and nothing here will see it. Every hop is the
+  caller's.
+- `URLGuard` does not resolve DNS, so it cannot see DNS rebinding, and it cannot tell a
+  private TLD from a public domain.
+- `SecretRedactor` is a matcher, not a parser, so a credential in a format no pattern
+  covers passes through by construction.
+- **A bare single-case hex secret is deliberately exempt**, which is what keeps git SHAs
+  and checksums intact. A labelled one is still caught. Two further known defects, a
+  labelled credential inside a JSON array or YAML sequence and one inside an XML or plist
+  element body, are disclosed in `docs/CORPUS.md` and pinned by tests.
+
+If you think one of those documented limits is worse than the documentation implies, that
+is still worth reporting. The line between a documented limit and a false sense of security
 is exactly the thing I would want to get right.
 
 ## Supported versions
