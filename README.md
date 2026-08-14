@@ -7,7 +7,7 @@
 [![Documentation](https://img.shields.io/badge/documentation-gray?logo=swift&logoColor=white)](https://swiftpackageindex.com/dotcomjack/grux/documentation)
 [![Licence](https://img.shields.io/badge/licence-MIT-8C6A2F)](LICENSE)
 
-Guardrails for desktop AI agents, in Swift. MIT licensed. Short version: [grux.gruxai.com](https://grux.gruxai.com).
+Guardrails for desktop AI agents, in Swift. MIT licensed. Short version: [gruxai.com](https://gruxai.com).
 
 ```text
 SecretRedactor.redact  "deploy with sk-ant-api03-..."  ->  "deploy with [REDACTED:ANTHROPIC_KEY]"
