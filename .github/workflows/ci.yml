@@ -5,6 +5,23 @@ on:
     branches: [main]
   pull_request:
 
+# Supersede in-flight runs on the same ref instead of paying for all of them. This repo
+# is the most expensive CI in the account and the reason is the matrix below: every run
+# starts TWO macOS jobs, and a macOS minute bills at 10x a Linux minute. Measured over
+# Aug 1 to 14 2026 this repo alone was $3.87 of $13.89 total across ten repos, on only
+# 41 runs, and those runs arrived in bursts of 8, 13 and 14 in a single day. A burst is
+# rapid successive pushes to the same branch, so every run but the last was already
+# obsolete before it finished, and each one was billed at the macOS rate anyway.
+#
+# cancel-in-progress is true for pushes to main as well as pull requests, which is the
+# deliberate half. The last push in a burst is never cancelled, so the final state of
+# main is always fully tested; what is given up is a per-commit green tick on the
+# intermediate commits of a burst. Re-run a specific commit from the Actions tab if one
+# ever needs its own verdict.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Least privilege for GITHUB_TOKEN. Neither job writes anything back to the repository,
 # so read access to the contents is the whole requirement. Without this block both jobs
 # inherit the repository default, which is broader than either one needs.
@@ -23,6 +40,15 @@ jobs:
     # apply the same UTS46 mapping. Testing only macos-15 would let that difference reach
     # a consumer on the minimum we advertise, with no CI leg able to see it.
     runs-on: ${{ matrix.os }}
+    # GitHub's default job timeout is 360 minutes. On a macOS runner that is $28.80 for
+    # a single stuck job, which is more than twice this repo's entire measured spend for
+    # the first half of August. This is not hypothetical here: the macos-13 note below
+    # records a leg that sat for 31 minutes and blocked both siblings from ever
+    # concluding. swift build plus swift test finishes in about 2 minutes, so 20 is
+    # already an order of magnitude of headroom and anything past it is a hang, not a
+    # slow run. Queue time does not count against this; the clock starts when the job
+    # starts executing.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -54,6 +80,8 @@ jobs:
 
   house-style:
     runs-on: ubuntu-latest
+    # A grep over the tree. If this has not finished in 10 minutes it is wedged.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       # Em dashes and en dashes are banned in this repo, including in comments and
