@@ -1,0 +1,85 @@
+name: False positive, ordinary text was destroyed
+description: SecretRedactor mangled a line that carries no credential.
+title: "[false positive] "
+labels: ["false-positive", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A redactor people switch off protects nothing, so this is treated as seriously as
+        a leak, not as a papercut. `Corpus.benign` has to reach **zero mangles** and this
+        is how entries get added to it.
+
+        Two known cases before you file, so you are not reporting something already
+        pinned:
+
+        - **Quoted prose under a credential-ish name is destroyed.** `"author": "Alice
+          Smith and Bob Jones"` and the OIDC `auth_url` and `token_url` fields all come
+          back redacted. 20 of 30 measured real-world config lines of that shape did not
+          survive. This is `testKnownDefectQuotedProseUnderACredentialishNameIsDestroyed`.
+        - **A single-component absolute path of 40 or more characters** carrying mixed
+          case and a digit is redacted deliberately, as the pinned price of closing a
+          leading-slash leak. If you hit a genuine one, say so here: the fix is a
+          word-shape test on the component, not loosening the segment count.
+
+        SECURITY.md lists false positives as in scope for the private channel, because of
+        what a switched-off redactor costs. If your example contains anything you would
+        not paste in public, use the private channel instead. A genuinely ordinary line
+        discloses nothing, so it is fine here.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Before you paste
+      options:
+        - label: This text carries no real credential. It is either synthetic or genuinely ordinary content.
+          required: true
+        - label: I checked the two known cases above and this is not one of them.
+          required: true
+
+  - type: textarea
+    id: input
+    attributes:
+      label: The exact line
+      description: >-
+        Byte for byte, including leading whitespace and quoting. Indentation changes the
+        result, so a reindented paste is not reproducible.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What redact returned
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: origin
+    attributes:
+      label: Where this text comes from
+      description: >-
+        The format and the file matter more than the single line, because they say how
+        often an agent will meet it. For example a package.json field, a Kubernetes
+        manifest, an OIDC discovery document, a Maven settings.xml, an Xcode build log.
+    validations:
+      required: true
+
+  - type: textarea
+    id: benign_entry
+    attributes:
+      label: A proposed Corpus.benign entry
+      description: >-
+        Optional and very welcome. One string literal is the whole contribution, and it
+        is what stops this regressing later.
+      render: swift
+
+  - type: input
+    id: version
+    attributes:
+      label: Grux version
+      placeholder: "0.6.1"
+    validations:
+      required: true

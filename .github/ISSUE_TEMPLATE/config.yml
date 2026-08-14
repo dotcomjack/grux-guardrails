@@ -1,0 +1,35 @@
+# Blank issues are off on purpose. This is a security library, and the single worst
+# launch-day outcome is a working bypass of SecretRedactor or URLGuard arriving as a
+# public issue with a real credential pasted into it. Every route below either forces
+# the reproducer fields a fix actually needs, or points at a channel only the maintainer
+# can read.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Report a security vulnerability, privately
+    url: https://github.com/dotcomjack/grux/security/advisories/new
+    about: >-
+      A secret that survived redact, or a URL that URLGuard allowed and that reaches a
+      private address, cloud metadata or loopback. Start here, not in a public issue.
+      Include the exact input and what you expected instead.
+
+  - name: Email the maintainer, privately
+    url: mailto:security@gruxai.com
+    about: >-
+      The same thing by email, subject line "Grux security". Use this whenever the
+      private reporting button above is not available to you. Acknowledgement within 3
+      days, an assessment within 14 for anything reproducible.
+
+  - name: Security policy, and what is already a documented limit
+    url: https://github.com/dotcomjack/grux/blob/main/SECURITY.md
+    about: >-
+      What counts as in scope, what is known and documented so is not a finding
+      (URLGuard follows no redirects and resolves no DNS, SecretRedactor is a matcher),
+      and the disclosure terms.
+
+  - name: Already known? Read the changelog first
+    url: https://github.com/dotcomjack/grux/blob/main/CHANGELOG.md
+    about: >-
+      Written as a narrative, and it records the wrong first attempts as well as the
+      fixes. Several defects are already pinned by testKnownDefect tests in
+      Tests/GruxTests/AdversarialRound2Tests.swift.

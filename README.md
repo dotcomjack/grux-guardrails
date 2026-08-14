@@ -1,7 +1,21 @@
 
 # Grux
 
-Guardrails for desktop AI agents, in Swift. MIT licensed.
+[![CI](https://github.com/dotcomjack/grux/actions/workflows/ci.yml/badge.svg)](https://github.com/dotcomjack/grux/actions/workflows/ci.yml)
+[![Platforms](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fdotcomjack%2Fgrux%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/dotcomjack/grux)
+[![Swift](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fdotcomjack%2Fgrux%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/dotcomjack/grux)
+[![Documentation](https://img.shields.io/badge/documentation-gray?logo=swift&logoColor=white)](https://swiftpackageindex.com/dotcomjack/grux/documentation)
+[![Licence](https://img.shields.io/badge/licence-MIT-8C6A2F)](LICENSE)
+
+Guardrails for desktop AI agents, in Swift. MIT licensed. Short version: [grux.gruxai.com](https://grux.gruxai.com).
+
+```text
+SecretRedactor.redact  "deploy with sk-ant-api03-..."  ->  "deploy with [REDACTED:ANTHROPIC_KEY]"
+URLGuard.evaluate      "http://[64:ff9b::7f00:1]/"     ->  denied, tag PRIVATE_NETWORK
+
+115 tests, 0 failures, on macOS 14 and macOS 15.  26 patterns.  0 external packages.
+2 of 814 real paths mangled.  40 of 9,323 corpus lines leaked.  6 of 9 tags leak credentials.
+```
 
 Everybody wants their own Jarvis. Most of the public attempts are demos: a loop that
 pipes a microphone into a model and executes whatever comes back. They are impressive
@@ -13,6 +27,11 @@ This library is the unglamorous half of that problem, extracted from a Mac agent
 has been running against a real workload daily. It does not include the agent. It
 includes the parts you would otherwise write badly at 2am and never test.
 
+**Be precise about whose credentials leaked.** This library failed to redact its users' secrets.
+No credential of mine has ever been in this repository: the only AWS-shaped string in the
+whole history is `AKIAIOSFODNN7EXAMPLE`, AWS's own published documentation example, and it
+sits in a test fixture. Nothing was deleted or force pushed, because the record is the point.
+
 **Status: early.** Two modules today, both production code with real coverage. More
 listed under Roadmap. It is versioned honestly, so what is here is here and nothing is
 promised as shipped that is not.
@@ -20,22 +39,66 @@ promised as shipped that is not.
 ## Install
 
 ```swift
-.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.0")
+// Package.swift
+.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")
+.product(name: "Grux", package: "grux")
+// then, in your source
+import Grux
 ```
 
-**Use 0.6.0. Every earlier tag leaks credentials, and each one looked fine when it was
-cut.** That second half is the part worth reading: six tags were published before 0.5.0 and
-all six were later found to leak, including by audits of code that had already survived
-several earlier ones. 0.5.0 is the most heavily audited state this library has been in and
-that is a statement about effort, not a guarantee. 0.6.0 is 0.5.0 with the module renamed
-and nothing else.
+Requires macOS 14, and the Swift 5.9 tools version or newer. Zero external packages, and
+you need not take that on trust: `grep -c '.package(' Package.swift` returns 0 and there
+is no `Package.resolved`. The library also builds clean on iOS, watchOS and Linux, and
+the TEST SUITE is macOS only, both measured under
+[Platforms and the whole manifest](#platforms-and-the-whole-manifest).
+
+**Use 0.6.1.** The six tags before 0.5.0 all leak credentials, and each one looked fine
+when it was cut. That disclosure has its own section:
+[Earlier tags leak credentials](#earlier-tags-leak-credentials).
+
+## Limits
+
+Read this part. It is the section a security library is actually judged on, and each
+module has its own longer one, [for SecretRedactor](#secretredactor-what-it-does-not-do)
+and [for URLGuard](#urlguard-what-it-does-not-do). The short version, with every line
+below pinned by a test so it cannot drift quietly:
+
+- **SecretRedactor is a matcher, not a parser**, so a credential in a format no pattern
+  covers passes straight through, by construction.
+- **It destroys some ordinary text.** Across 30 ordinary config lines whose field NAME
+  merely contains a credential word, 20 were destroyed. Base64 data URIs and
+  `integrity="sha384-..."` hashes go the same way.
+- **A labelled credential inside a JSON array, a YAML sequence, or an XML or plist
+  element body survives.** Disclosed, not fixed, and pinned by `testKnownDefect` tests.
+- **Single-case hex is deliberately exempt**, which keeps git SHAs and checksums intact
+  and lets a 32 or 64 character lowercase-hex API secret through untouched.
+- **URLGuard does not follow redirects.** It judges one string. You must re-evaluate
+  every hop, and the delegate below shows the shape that actually fails the task.
+- **URLGuard does not resolve DNS**, so it cannot stop rebinding, and it cannot tell a
+  private TLD from a public domain.
+- **`allowlist` overrides the private-network denial.** That is the whole point of it
+  and also its teeth.
+
+**There is no fuzz target, and fuzzing is not yet performed.** The adversarial corpus is
+what stands in for it: 115 tests, table-driven, with the must-stay-redacted cases sitting
+in the same file as the must-survive cases so the trade cannot drift in one direction
+unnoticed. Three of those tests are honest known-defect expectations rather than passes.
+
+## Earlier tags leak credentials
+
+Six tags were published before 0.5.0 and all six were later found to leak, including by
+audits of code that had already survived several earlier ones. 0.5.0 is the most heavily
+audited state this library has been in and that is a statement about effort, not a
+guarantee. 0.6.0 is 0.5.0 with the module renamed and nothing else. 0.6.1 is 0.6.0 plus
+two provider patterns, an RFC 2765 decode, and a platform floor raised to macOS 14.
 
 **The module was `GruxKit` up to and including 0.5.0, and is `Grux` from 0.6.0 onward.**
-That rename is the only breaking change in 0.6.0, and it is why every snippet below says
-`from: "0.6.0"`.
+That rename is the only breaking change in 0.6.0, and it is why every snippet here asks
+for a version at or above 0.6.0. They ask for 0.6.1 specifically because that is the
+current tag and it carries fixes 0.6.0 does not.
 
-Be precise about what breaks, because `from:` is a range and not a pin. `from: "0.6.0"`
-means `[0.6.0, 1.0.0)`, so it can only ever resolve to a tag that has the `Grux` product.
+Be precise about what breaks, because `from:` is a range and not a pin. `from: "0.6.1"`
+means `[0.6.1, 1.0.0)`, so it can only ever resolve to a tag that has the `Grux` product.
 What fails is a constraint that actually holds you at or below 0.5.0: `.exact("0.5.0")`,
 or an `upToNextMinor` range, or `from: "0.5.0"` evaluated before 0.6.0 is tagged. In any of
 those, `import Grux` fails to resolve with `product 'Grux' not found`, because 0.5.0
@@ -60,13 +123,10 @@ fails open and looks configured.
 Earlier tags stay resolvable so existing checkouts do not break, and are documented in
 [CHANGELOG.md](CHANGELOG.md) so nobody adopts one by accident.
 
-Pre-1.0, so treat the minor version as breaking. Pin exactly if that matters to you.
+Pre-1.0, so treat the minor version as breaking. If pinning exactly matters to you, pin
+`.exact("0.6.1")`, which is the current tag, and not an earlier one.
 
-```swift
-.target(name: "YourAgent", dependencies: [.product(name: "Grux", package: "grux")])
-```
-
-Requires macOS 14 and Swift 5.9. No third-party dependencies.
+## Platforms and the whole manifest
 
 **Your own manifest needs `platforms: [.macOS(.v14)]` too.** That line is not optional and
 leaving it out is a build failure, not a warning:
@@ -88,7 +148,7 @@ let package = Package(
     name: "YourAgent",
     platforms: [.macOS(.v14)],
     products: [.library(name: "YourAgent", targets: ["YourAgent"])],
-    dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.0")],
+    dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")],
     targets: [
         .target(name: "YourAgent",
                 dependencies: [.product(name: "Grux", package: "grux")]),
@@ -100,6 +160,21 @@ Both claims here were checked by building them. A fresh `swift package init` plu
 isolated snippets above and nothing else fails on the platform mismatch; adding the
 `platforms` line builds clean. The block immediately above was pasted byte for byte into an
 empty file and built on its own.
+
+**macOS 14 is the floor CI can prove, not a limit of the code.** Both source files import
+Foundation and nothing else, with no platform conditionals anywhere, so the library builds
+well outside its declared floor. Measured: `xcodebuild -scheme Grux -destination
+'generic/platform=iOS'` reports `** BUILD SUCCEEDED **`, watchOS reports the same, and
+`swift build` in the official `swift:6.1` Linux image exits 0 from a clean build path.
+tvOS and visionOS are untested here only because those platforms are not installed on the
+machine that ran the check.
+
+**The test suite is macOS only, and that is a real gap.** Three tests use
+`XCTExpectFailure`, which ships with Apple's XCTest and not with swift-corelibs-xctest. So
+on Linux `swift build` exits 0 while `swift build --build-tests` exits 1 with three
+`cannot find 'XCTExpectFailure' in scope` errors. If you clone this on Linux, `swift test`
+does not compile. Nothing in CI catches that today, because there is no Linux leg, and a
+compatibility badge built from `swift build` alone will show Linux green regardless.
 
 ## SecretRedactor
 
@@ -253,7 +328,7 @@ attacker who sees one transcript can forge the closer in every future one.
 The fence still does not make injection impossible. It gives the model a boundary it can
 act on, and it is not a substitute for withholding capabilities the agent did not need.
 
-### What it does not do
+### SecretRedactor: what it does not do
 
 It is a matcher, not a parser, so it cannot catch a secret that does not look like one.
 A password, a session cookie with a short opaque value, an internal hostname, or a
@@ -409,7 +484,7 @@ neighbours.
 `evaluate` is pure and synchronous, which is what makes the policy table-testable. Wire
 your own auditing around it.
 
-### What it does not do
+### URLGuard: what it does not do
 
 Read this part. A guard whose limits you do not know is worse than no guard, because you
 stop looking.
@@ -492,6 +567,29 @@ literal NUL byte, parses as an ordinary multi-label name, and reads as plain loo
 any resolver that truncates at NUL. It is denied now, on structural grounds, with a
 regression test.
 
+## Verifying this yourself
+
+Nothing here asks to be believed. Every claim in this section is one command.
+
+**115 tests, 0 failures**, on macOS 14 and macOS 15, which is the CI matrix. Run
+`swift test`. Count them with `grep -rho 'func test' Tests/ | wc -l`. There is no coverage
+percentage anywhere in this repo on purpose: a high one is easy to reach with weak tests,
+and the corpus files are the honest artifact instead.
+
+**Tags are signed from 0.6.0 onward, and 0.1.0 through 0.5.0 are not.** Check with
+`git tag -v 0.6.1`. Expect the output to read `Good "git" signature`, with the word `git`
+in quotes, which is what git prints for an SSH signature and is not a warning.
+
+**Zero external packages.** `grep -c '.package(' Package.swift` returns 0, and there is no
+`Package.resolved`, so the dependency graph this library can drag in is empty by
+construction rather than by discipline.
+
+**What CI cannot prove is stated rather than hidden.** macOS 13 is not supported, and the
+reason is in the workflow comments: its hosted runner queued for 31 minutes while 14 and 15
+finished in about two, and held the whole run in `queued`, so the homograph loopback
+defence could never be verified there. 0.6.1 raised the floor to macOS 14 rather than keep
+advertising a minimum no CI leg could ever reach.
+
 ## Roadmap
 
 In the order they are coming out of the private codebase, each one landing with its
@@ -510,7 +608,12 @@ tests rather than as a sketch:
 
 Issues and pull requests welcome. Two asks. Ship a test with behaviour changes, since
 every module here is table-driven for that reason. And no em dashes or en dashes in code,
-comments or docs, which is a house style the linter enforces.
+comments or docs, which is a house style the linter enforces. The longer version is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+Found a bypass? That is the report worth sending, and it does not belong in a public
+issue. Use GitHub's private vulnerability reporting on this repository, and see
+[SECURITY.md](SECURITY.md) for what is in scope and what is already documented as a limit.
 
 ## Licence
 
