@@ -38,7 +38,7 @@ promised as shipped that is not.
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")
+.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")
 .product(name: "Grux", package: "grux")
 // then, in your source
 import Grux
@@ -50,7 +50,7 @@ is no `Package.resolved`. The library also builds clean on iOS, watchOS and Linu
 the TEST SUITE is macOS only, both measured under
 [Platforms and the whole manifest](#platforms-and-the-whole-manifest).
 
-**Use 0.6.1.** The six tags before 0.5.0 all leak credentials, and each one looked fine
+**Use 0.6.2.** The six tags before 0.5.0 all leak credentials, and each one looked fine
 when it was cut. That disclosure has its own section:
 [Earlier tags leak credentials](#earlier-tags-leak-credentials).
 
@@ -90,15 +90,17 @@ Six tags were published before 0.5.0 and all six were later found to leak, inclu
 audits of code that had already survived several earlier ones. 0.5.0 is the most heavily
 audited state this library has been in and that is a statement about effort, not a
 guarantee. 0.6.0 is 0.5.0 with the module renamed and nothing else. 0.6.1 is 0.6.0 plus
-two provider patterns, an RFC 2765 decode, and a platform floor raised to macOS 14.
+two provider patterns, an RFC 2765 decode, and a platform floor raised to macOS 14. 0.6.2
+is 0.6.1 with no source change at all: `Sources/` is byte identical, and the release exists
+because the documentation shipped inside the 0.6.1 tag told readers to install 0.6.0.
 
 **The module was `GruxKit` up to and including 0.5.0, and is `Grux` from 0.6.0 onward.**
 That rename is the only breaking change in 0.6.0, and it is why every snippet here asks
-for a version at or above 0.6.0. They ask for 0.6.1 specifically because that is the
+for a version at or above 0.6.0. They ask for 0.6.2 specifically because that is the
 current tag and it carries fixes 0.6.0 does not.
 
-Be precise about what breaks, because `from:` is a range and not a pin. `from: "0.6.1"`
-means `[0.6.1, 1.0.0)`, so it can only ever resolve to a tag that has the `Grux` product.
+Be precise about what breaks, because `from:` is a range and not a pin. `from: "0.6.2"`
+means `[0.6.2, 1.0.0)`, so it can only ever resolve to a tag that has the `Grux` product.
 What fails is a constraint that actually holds you at or below 0.5.0: `.exact("0.5.0")`,
 or an `upToNextMinor` range, or `from: "0.5.0"` evaluated before 0.6.0 is tagged. In any of
 those, `import Grux` fails to resolve with `product 'Grux' not found`, because 0.5.0
@@ -127,7 +129,7 @@ with a severity and a vector for each, is in
 [docs/DISCLOSURE-2026-08.md](docs/DISCLOSURE-2026-08.md).
 
 Pre-1.0, so treat the minor version as breaking. If pinning exactly matters to you, pin
-`.exact("0.6.1")`, which is the current tag, and not an earlier one.
+`.exact("0.6.2")`, which is the current tag, and not an earlier one.
 
 ## Platforms and the whole manifest
 
@@ -151,7 +153,7 @@ let package = Package(
     name: "YourAgent",
     platforms: [.macOS(.v14)],
     products: [.library(name: "YourAgent", targets: ["YourAgent"])],
-    dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")],
+    dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")],
     targets: [
         .target(name: "YourAgent",
                 dependencies: [.product(name: "Grux", package: "grux")]),
@@ -582,7 +584,7 @@ are built, and which direction each one is allowed to fail in is in
 [docs/CORPUS.md](docs/CORPUS.md).
 
 **Tags are signed from 0.6.0 onward, and 0.1.0 through 0.5.0 are not.** Check with
-`git tag -v 0.6.1`. Expect the output to read `Good "git" signature`, with the word `git`
+`git tag -v 0.6.2`. Expect the output to read `Good "git" signature`, with the word `git`
 in quotes, which is what git prints for an SSH signature and is not a warning.
 
 **Zero external packages.** `grep -c '.package(' Package.swift` returns 0, and there is no

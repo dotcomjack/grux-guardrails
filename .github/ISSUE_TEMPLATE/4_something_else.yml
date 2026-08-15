@@ -55,6 +55,6 @@ body:
     id: version
     attributes:
       label: Grux version, macOS version, Swift version
-      placeholder: "0.6.1, macOS 14.6, Swift 5.9"
+      placeholder: "0.6.2, macOS 14.6, Swift 5.9"
     validations:
       required: true

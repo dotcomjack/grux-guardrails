@@ -2,7 +2,7 @@
 
 What Grux defends, what it deliberately does not, and where the line sits.
 
-Written for 0.6.1. Every claim below is either a line of source you can open or a test
+Written for 0.6.2. Every claim below is either a line of source you can open or a test
 symbol you can run. Where a defence has a hole, the hole is named here rather than left
 for a reader to find.
 

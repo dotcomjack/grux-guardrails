@@ -2,7 +2,7 @@
 
 **2026-08-14.** Six tags of this library, `0.1.0` through `0.4.0`, contain defects in the two
 controls the library exists to provide. Each one was found by an audit of code that had
-already survived earlier audits. All six are fixed in `0.5.0`. **Use `0.6.1`.**
+already survived earlier audits. All six are fixed in `0.5.0`. **Use `0.6.2`.**
 
 The tags are not being deleted, rewritten, or force pushed. They stay exactly where they
 are, and this page plus six GitHub Security Advisories are the disclosure.
@@ -19,7 +19,8 @@ are, and this page plus six GitHub Security Advisories are the disclosure.
 | `0.4.0` | **Affected** | 2026-08-08 19:21 to 2026-08-10 13:39 ET | Denylist fails open unless entries are bare hosts, plus loopback and NAT64 SSRF bypasses and six credential leak classes | Critical, CVSS 9.3 |
 | `0.5.0` | Not affected | first clean tag, 2026-08-10 | none known | |
 | `0.6.0` | Not affected | 2026-08-13 | `0.5.0` with the module renamed, nothing else | |
-| `0.6.1` | **Use this one** | current | none known | |
+| `0.6.1` | Not affected | 2026-08-13 to 2026-08-15 | two provider patterns, an RFC 2765 decode, platform floor raised to macOS 14 | |
+| `0.6.2` | **Use this one** | current | none known | |
 
 The exposure window is the interval during which each tag was the newest available. A
 consumer pinned to an affected tag is exposed until they move, regardless of that window.
@@ -34,7 +35,7 @@ disclosure.
 
 ## What you should do
 
-**If you have never used this library, nothing. Start at `0.6.1`.**
+**If you have never used this library, nothing. Start at `0.6.2`.**
 
 If you have a `Package.swift` or a `Package.resolved` naming this package, check which tag
 you resolved and move:
@@ -47,7 +48,7 @@ grep -A3 -i grux Package.resolved
 Then pin forward:
 
 ```swift
-.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")
+.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")
 ```
 
 **The module was renamed, so this is not a drop-in bump from `0.5.0` or earlier.** It is
@@ -57,7 +58,7 @@ Then pin forward:
 import Grux      // was: import GruxKit
 ```
 
-`from: "0.6.1"` means the range `[0.6.1, 1.0.0)`, so it can only ever resolve to a tag that
+`from: "0.6.2"` means the range `[0.6.2, 1.0.0)`, so it can only ever resolve to a tag that
 has the `Grux` product. What breaks is a constraint that actually holds you at or below
 `0.5.0`: `.exact("0.5.0")`, an `upToNextMinor` range, or a `from: "0.5.0"` written before
 `0.6.0` existed. In any of those, `import Grux` fails with `product 'Grux' not found`.
