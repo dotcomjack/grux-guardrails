@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.6.2, 2026-08-15
+
+**No source change. `Sources/` is byte identical to 0.6.1.** This release exists because the
+documentation shipped INSIDE the 0.6.1 tag told readers to install 0.6.0.
+
+A tag is immutable, and a README is vendored into every checkout that resolves it. So the
+copy of the README a stranger reads on the 0.6.1 release page, and the copy sitting in their
+`.build` directory, both said `from: "0.6.0"` and `**Use 0.6.0.**` while the launch site
+advertised 0.6.1. Correcting `main` did not correct either of those, because a fix on a
+branch is not a fix in a tag.
+
+The fix is structural rather than a one-off correction: the version now moves in the SAME
+commit that gets tagged, so the tag's own documentation names the tag it lives in. Bumping
+after tagging would have reproduced the bug one release later, which is what nearly happened.
+
+Also in this release, all documentation rather than code:
+
+- The published bare 40-character credential leak rate was corrected from "roughly 1.3%" to
+  roughly 0.85%. 1.3% was the PRE-0.5.0 figure. 0.5.0 took the rate to 0.875% and updated the
+  CHANGELOG and nothing else, so `docs/CORPUS.md`, `CONTRIBUTING.md` rule 6 and the comment
+  above the assertion in `CorpusTests.swift` all carried a number three releases stale.
+  Measured across 8 runs on three machines: 0.78% to 0.97%.
+- The 2.0% guard on that rate is UNCHANGED and its looseness is now written down. At 20,000
+  trials the sampling deviation is about 0.065 points, so 2.0 sits roughly 18 deviations above
+  the mean and the rate could more than double before it trips. `CONTRIBUTING.md` rule 6 asks
+  for a guard "just above" the measured value, so 2.0 does not meet the project's own
+  standard. It is recorded as a known gap rather than quietly narrowed, because moving a
+  published threshold in either direction changes the claim the library makes.
+- `docs/THREAT-MODEL.md` said "Grux is two pure functions and nothing else". The public API is
+  five: `redact`, `evaluate`, two `wrapAsUntrusted` overloads and `newFenceID`. A threat model
+  that names two entry points invites a reviewer to review two.
+- `docs/CORPUS.md` gained a provenance column separating numbers a test recomputes every run
+  from numbers measured once against corpora that are not in this repository. Three rows cited
+  a test that structurally could not produce the number beside it.
+- The complexity row cited CHANGELOG 0.5.0 for the 65x curly-apostrophe cliff. That entry is
+  under 0.3.0; the only 65x inside 0.5.0 is an unrelated measurement with a coincidentally
+  identical multiplier. The same row called the test's input "smaller" than the 296KB cliff
+  when it is 8,000 repetitions of a 41 character unit, so 328,000 characters, which is larger.
+- The install-snippet coherence test no longer requires a code block to contain
+  `let package = Package(`, so the README's primary one-line snippet is checked for the first
+  time. It selects fenced Swift blocks by what they contain rather than by line number, so it
+  cannot be broken by moving text around the README.
+
 ## 0.6.1, 2026-08-13
 
 Three changes, all of them narrow on purpose. Two more findings from the same audit round

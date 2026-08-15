@@ -484,7 +484,7 @@ final class SecretRedactorTests: XCTestCase {
     /// is a historical record.
     /// The controls live in this same function rather than in a second one on purpose.
     /// The count of test functions in this directory is a claim the README makes in three
-    /// places, and CODEOWNERS, the CHANGELOG and the 0.6.1 release note repeat it, so
+    /// places, and CODEOWNERS, the CHANGELOG and the 0.6.2 release note repeat it, so
     /// adding a function here silently falsifies six statements in four files this shard
     /// does not own. The coverage is identical either way, so the cheaper shape wins.
     ///
@@ -506,7 +506,7 @@ final class SecretRedactorTests: XCTestCase {
         let goodPrimary = """
         ```swift
         // Package.swift
-        .package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")
+        .package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")
         .product(name: "Grux", package: "grux")
         // then, in your source
         import Grux
@@ -520,7 +520,7 @@ final class SecretRedactorTests: XCTestCase {
         let package = Package(
             name: "YourAgent",
             platforms: [.macOS(.v14)],
-            dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.1")],
+            dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")],
             targets: [.target(name: "YourAgent",
                               dependencies: [.product(name: "Grux", package: "grux")])]
         )
@@ -533,7 +533,7 @@ final class SecretRedactorTests: XCTestCase {
                  + "\n" + goodManifest,
              "repository"),
             ("primary snippet asks for Grux at a GruxKit-only version",
-             goodPrimary.replacingOccurrences(of: "0.6.1", with: "0.5.0") + "\n" + goodManifest,
+             goodPrimary.replacingOccurrences(of: "0.6.2", with: "0.5.0") + "\n" + goodManifest,
              "only ships GruxKit"),
             ("primary snippet asks for GruxKit at a post-rename version",
              goodPrimary.replacingOccurrences(of: "\"Grux\", package:", with: "\"GruxKit\", package:")
@@ -541,7 +541,7 @@ final class SecretRedactorTests: XCTestCase {
                  + "\n" + goodManifest,
              "renamed it to Grux"),
             ("primary snippet admits a tag that leaks credentials",
-             goodPrimary.replacingOccurrences(of: "0.6.1", with: "0.3.1") + "\n" + goodManifest,
+             goodPrimary.replacingOccurrences(of: "0.6.2", with: "0.3.1") + "\n" + goodManifest,
              "leak credentials"),
             ("manifest has no tools-version pragma",
              goodPrimary + "\n"
@@ -558,7 +558,7 @@ final class SecretRedactorTests: XCTestCase {
             ("an install call sits in prose where the block scan cannot reach it",
              goodPrimary + "\n" + goodManifest
                  + "\n\nOr add `.package(url: \"https://github.com/dotcomjack/grux.git\", "
-                 + "from: \"0.6.1\")` to your own manifest.\n",
+                 + "from: \"0.6.2\")` to your own manifest.\n",
              "outside any fenced swift block"),
             ("the whole-manifest example disappeared",
              goodPrimary,

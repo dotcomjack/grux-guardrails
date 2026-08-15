@@ -92,7 +92,7 @@ body:
     attributes:
       label: Grux version
       description: The tag or commit you observed this on.
-      placeholder: "0.6.1"
+      placeholder: "0.6.2"
     validations:
       required: true
 
