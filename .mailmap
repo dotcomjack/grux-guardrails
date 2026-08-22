@@ -1,8 +1,12 @@
-# One person, two names, one address. Git history carries both "DCJ" and
-# "Jack Brandt" against jack@dotcomjack.com, so `git shortlog -sn` reports two
+# One person, several spellings, one address. Git history carries "DCJ" and a
+# personal name against jack@dotcomjack.com, so `git shortlog -sn` reports two
 # contributors and the Swift Package Index would headline the acronym as the
 # author of a security library.
 #
-# Because both spellings share the same commit address, the single name form is
+# Canonicalised to DotcomJack, which is the same author string the application
+# repository publishes. Two public repositories crediting the same person under
+# two different names is a small thing that reads as carelessness.
+#
+# Because every spelling shares one commit address, the single name form is
 # enough. The two address mapping form is not needed here.
-Jack Brandt <jack@dotcomjack.com>
+DotcomJack <jack@dotcomjack.com>

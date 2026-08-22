@@ -3,7 +3,7 @@
 ## A note on scale
 
 This is a solo project. There is no committee and no appeals board, so "the maintainers"
-below means one person: Jack Brandt, reachable at `jack@dotcomjack.com`. That is worth
+below means one person: DotcomJack, reachable at `jack@dotcomjack.com`. That is worth
 saying plainly rather than letting the standard text imply an organisation that does not
 exist.
 

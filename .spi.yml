@@ -10,7 +10,7 @@ metadata:
   # authors is a String, not a list. A YAML sequence here fails to decode Metadata,
   # which fails the whole file. Without this line SPI infers the author from git
   # history, which reads "DCJ".
-  authors: Jack Brandt
+  authors: DotcomJack
 
 builder:
   configs:
