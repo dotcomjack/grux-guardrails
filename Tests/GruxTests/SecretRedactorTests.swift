@@ -1098,6 +1098,40 @@ final class ReadmeClaimsTests: XCTestCase {
         throw XCTSkip("README.md not found, likely consumed as a dependency")
     }
 
+    /// The README's "N tests" claim, against the suite that actually exists.
+    ///
+    /// It said 115 in three places while the suite had 124, and it had been wrong since
+    /// 0.8.0 added five tests. Nothing noticed, because a number in prose is exactly the
+    /// kind of claim that ages silently: it is true when written, nobody re-derives it,
+    /// and it is quoted downstream. The Grux README and gruxai.com both repeated it.
+    ///
+    /// Counts `func test` declarations rather than asking XCTest at runtime, which keeps
+    /// this a pure source check like the pattern count above. Measured 2026-09-06: 124
+    /// declarations, 124 executed, so the two agree and the cheaper one is fine.
+    func testTestCountClaimMatchesTheSuite() throws {
+        let text = try readme()
+        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasSuffix(".swift") }
+        var declared = 0
+        for f in files {
+            let src = try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8)
+            declared += src.ranges(of: try! Regex(#"\n\s+func test[A-Za-z0-9_]*\("#)).count
+        }
+        XCTAssertGreaterThan(declared, 100, "counted only \(declared) test declarations, the parse is broken")
+
+        let claims = text.ranges(of: try! Regex(#"\d{2,4} tests"#)).map { String(text[$0]) }
+        XCTAssertFalse(claims.isEmpty, "the README stopped stating a test count at all")
+        for claim in Set(claims) {
+            let n = Int(claim.replacingOccurrences(of: " tests", with: "")) ?? -1
+            XCTAssertEqual(n, declared, """
+                README says "\(claim)" and the suite declares \(declared). Move both \
+                together. This claim is quoted in the Grux README and on gruxai.com, so a \
+                stale number here propagates to two surfaces nobody will re-check.
+                """)
+        }
+    }
+
     func testPatternCountMatchesTheCode() throws {
         let text = try readme()
         let source = try String(
