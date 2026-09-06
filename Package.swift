@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "Grux",
+    name: "GruxGuardrails",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "Grux", targets: ["Grux"])
+        .library(name: "GruxGuardrails", targets: ["GruxGuardrails"])
     ],
     targets: [
-        .target(name: "Grux"),
-        .testTarget(name: "GruxTests", dependencies: ["Grux"])
+        .target(name: "GruxGuardrails"),
+        .testTarget(name: "GruxTests", dependencies: ["GruxGuardrails"])
     ]
 )

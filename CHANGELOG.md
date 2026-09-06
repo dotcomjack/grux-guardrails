@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.7.0, 2026-09-06
+
+**Breaking, and it is the only change: the module is renamed from `Grux` to
+`GruxGuardrails`.** Every consumer's `import Grux` becomes `import GruxGuardrails`, and
+`.product(name: "Grux", package: "grux-guardrails")` becomes
+`.product(name: "GruxGuardrails", package: "grux-guardrails")`. No source behaviour
+moved: the redactor and the URL guard are byte identical to 0.6.2.
+
+**The rename was forced, not chosen.** The application this library was extracted from,
+`dotcomjack/grux`, has an application target also called `Grux`. Two modules of the same
+name cannot coexist in one build graph, so the app could not link this package at all.
+That is not a theoretical limit. Measured 2026-09-06:
+
+```
+error: multiple similar targets 'Grux' appear in package 'aliastest' and
+'grux-guardrails', this may indicate that the two packages are the same
+```
+
+SwiftPM's `moduleAliases` is the documented escape hatch and it does not apply here,
+because aliasing is unavailable when the ROOT package owns the clashing name. The only
+remaining move is to rename the library, so the library is renamed.
+
+**Why it matters beyond a build error.** The app shipped its own older copy of both
+controls rather than depending on this package, and six of eight defects disclosed in
+the advisories for 0.1.0 through 0.4.0 were still live in it. The name collision is the
+reason nobody folded the app back onto the hardened code. Removing the collision is what
+makes that possible.
+
+Migration is two lines:
+
+```swift
+// before, 0.6.x
+.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")
+.product(name: "Grux", package: "grux-guardrails")
+
+// after, 0.7.0
+.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.7.0")
+.product(name: "GruxGuardrails", package: "grux-guardrails")
+```
+
+The README install guard now knows three module eras rather than two: `GruxKit` below
+0.6.0, `Grux` from 0.6.0, `GruxGuardrails` from 0.7.0. Longest name first, because `Grux`
+is a prefix of both of the others and asking about it first misreads every snippet from
+either other era. Both new rules ship with a planted control that proves they fire.
+
+115 tests, 0 failures.
+
 ## 0.6.2, 2026-08-15
 
 **No source change. `Sources/` is byte identical to 0.6.1.** This release exists because the
@@ -89,9 +136,9 @@ ordinary config lines whose field name merely contains a credential word, includ
 ## 0.6.0, 2026-08-13
 
 **Breaking, and it is the only change: the module is renamed from `GruxKit` to `Grux`.**
-Every consumer's `import GruxKit` stops compiling and becomes `import Grux`. The package
+Every consumer's `import GruxKit` stops compiling and becomes `import GruxGuardrails`. The package
 identity changes with it, so `.product(name: "GruxKit", package: "grux-kit")` becomes
-`.product(name: "Grux", package: "grux-guardrails")`, and the repository moves to
+`.product(name: "GruxGuardrails", package: "grux-guardrails")`, and the repository moves to
 `github.com/dotcomjack/grux-guardrails`.
 
 Migration is two lines and there is no behaviour change to test against:
@@ -102,14 +149,14 @@ Migration is two lines and there is no behaviour change to test against:
 
 // after, 0.6.0
 .package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.0")
-.product(name: "Grux", package: "grux-guardrails")
+.product(name: "GruxGuardrails", package: "grux-guardrails")
 ```
 
 Be precise about what breaks, because `from:` is a range and not a pin. `from: "0.6.0"`
 means `[0.6.0, 1.0.0)`, so it can only ever resolve to a tag that carries the `Grux`
 product. What fails is a constraint that actually holds you at or below 0.5.0:
 `.exact("0.5.0")`, an `upToNextMinor` range, or `from: "0.5.0"` evaluated before 0.6.0
-is tagged. In any of those, `import Grux` fails to resolve with
+is tagged. In any of those, `import GruxGuardrails` fails to resolve with
 `product 'Grux' not found`, because 0.5.0 declares the product as `GruxKit`.
 
 Also removed: a generated banner file that shipped inside the built library, imported

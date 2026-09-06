@@ -1,5 +1,5 @@
 import XCTest
-@testable import Grux
+@testable import GruxGuardrails
 
 /// Round two of the adversarial audit.
 ///

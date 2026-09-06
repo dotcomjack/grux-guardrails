@@ -1,5 +1,5 @@
 import XCTest
-@testable import Grux
+@testable import GruxGuardrails
 
 /// Table-driven coverage for the URL policy. Drives the pure
 /// `URLGuard.evaluate(_:config:)` with explicit configs, so there is no disk and no

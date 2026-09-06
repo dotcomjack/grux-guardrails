@@ -48,7 +48,7 @@ grep -A3 -i grux Package.resolved
 Then pin forward:
 
 ```swift
-.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")
+.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.7.0")
 ```
 
 **The module was renamed, so this is not a drop-in bump from `0.5.0` or earlier.** It is
@@ -58,10 +58,10 @@ Then pin forward:
 import Grux      // was: import GruxKit
 ```
 
-`from: "0.6.2"` means the range `[0.6.2, 1.0.0)`, so it can only ever resolve to a tag that
+`from: "0.7.0"` means the range `[0.6.2, 1.0.0)`, so it can only ever resolve to a tag that
 has the `Grux` product. What breaks is a constraint that actually holds you at or below
 `0.5.0`: `.exact("0.5.0")`, an `upToNextMinor` range, or a `from: "0.5.0"` written before
-`0.6.0` existed. In any of those, `import Grux` fails with `product 'Grux' not found`.
+`0.6.0` existed. In any of those, `import GruxGuardrails` fails with `product 'Grux' not found`.
 
 **Then rotate anything the agent saw.** Moving the library forward does not un-send a
 credential that already reached a model provider. If you ran an affected tag against real
