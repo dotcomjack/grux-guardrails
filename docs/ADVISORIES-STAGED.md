@@ -19,6 +19,20 @@ $ gh api /repos/dotcomjack/grux/security-advisories
 {"message":"Not Found","documentation_url":"https://docs.github.com/rest","status":"404"}
 ```
 
+**That measurement is kept verbatim and its subject is now the wrong repository, which is
+itself the story.** It was taken on 2026-08-14 against `dotcomjack/grux`, because 0.6.0 had
+announced the package was moving there. It never moved. `dotcomjack/grux` was created on
+2026-08-18 as the macOS application, and this package stayed at `dotcomjack/grux-guardrails`.
+Every command below has been repointed. Re-measured 2026-09-06 against the real repository,
+which is public:
+
+```
+$ gh api /repos/dotcomjack/grux-guardrails/security-advisories
+[]
+```
+
+An empty array, not a 404, so the endpoint is reachable and the block is lifted.
+
 That is a 404, not an empty array, so the endpoint is not merely empty: it is unreachable
 while the repository is private. This is the same class of block as GitHub private
 vulnerability reporting, which is also public-repos-only. Neither is an oversight, and
@@ -39,11 +53,11 @@ the tags become resolvable, because that is when the advisory starts reaching a 
 ## Before you file anything
 
 1. **Confirm the repository is public.**
-   `gh api /repos/dotcomjack/grux --jq .visibility` returns `public`.
+   `gh api /repos/dotcomjack/grux-guardrails --jq .visibility` returns `public`.
 2. **Confirm the package identity still matches.** Every payload names the package as
-   `github.com/dotcomjack/grux`. If the repository ever moves, update `vulnerabilities[0].package.name`
+   `github.com/dotcomjack/grux-guardrails`. If the repository ever moves, update `vulnerabilities[0].package.name`
    in all six first, or they are filed against a path that does not resolve.
-   `gh api /repos/dotcomjack/grux --jq .full_name` returns `dotcomjack/grux`.
+   `gh api /repos/dotcomjack/grux-guardrails --jq .full_name` returns `dotcomjack/grux-guardrails`.
 3. **Confirm the affected tags are actually there.** `git ls-remote --tags origin` lists
    `0.1.0` through `0.4.0`. An advisory whose affected range matches no published tag is
    noise.
@@ -60,12 +74,12 @@ one."
 cd docs/advisories
 
 # 0.4.0 first, deliberately.
-gh api repos/dotcomjack/grux/security-advisories --method POST --input 6-tag-0.4.0.json
+gh api repos/dotcomjack/grux-guardrails/security-advisories --method POST --input 6-tag-0.4.0.json
 
 # Then the rest.
 for f in 1-tag-0.1.0.json 2-tag-0.2.0.json 3-tag-0.2.1.json 4-tag-0.3.0.json 5-tag-0.3.1.json; do
   echo "filing $f"
-  gh api repos/dotcomjack/grux/security-advisories --method POST --input "$f" --jq '.ghsa_id'
+  gh api repos/dotcomjack/grux-guardrails/security-advisories --method POST --input "$f" --jq '.ghsa_id'
 done
 ```
 
@@ -79,7 +93,7 @@ This is the playbook's own ST-01 check. It must return at least one row, and aft
 run it returns six.
 
 ```
-gh api repos/dotcomjack/grux/security-advisories \
+gh api repos/dotcomjack/grux-guardrails/security-advisories \
   --jq '.[] | [.ghsa_id, .state, .cwe_ids[0]] | @tsv'
 ```
 
@@ -87,7 +101,7 @@ Expect six rows, every `state` reading `draft`, and a CWE on each. Then read one
 full and check the rendered body before going further:
 
 ```
-gh api repos/dotcomjack/grux/security-advisories --jq '.[0]'
+gh api repos/dotcomjack/grux-guardrails/security-advisories --jq '.[0]'
 ```
 
 ## Publish, which is the irreversible step
@@ -99,7 +113,7 @@ Publishing is done from the advisory page in the browser, or by patching the dra
 response:
 
 ```
-gh api repos/dotcomjack/grux/security-advisories --jq '.[] | [.ghsa_id, .state] | @tsv'
+gh api repos/dotcomjack/grux-guardrails/security-advisories --jq '.[] | [.ghsa_id, .state] | @tsv'
 ```
 
 Then check the public record rather than the confirmation page. A filing that exists is not
