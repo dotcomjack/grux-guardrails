@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.1, 2026-09-06
+
+**`Sources/` is byte identical to 0.8.0. One test was wrong and it shipped red.**
+
+`testEvidenceOnlyLeavesALocalIdentifierAlone` asserted a precondition that is false:
+that the full pass set takes `session 'a1b2c3'`. It does not. Whitespace is the weakest
+separator in the labelled pass and `session` is deliberately absent from
+`whitespaceSeparableNames`, so the whitespace form is left alone by design. The shape
+that actually reproduces the Grux defect is `session_id: sh-...`, where the colon is a
+strong separator.
+
+The tag before this one stays resolvable, like every other tag here. What it carries is
+a red suite, not a leak.
+
+Both forms are now pinned, so the asymmetry between them is on the record rather than
+rediscovered by whoever writes that test the obvious way next.
+
 ## 0.8.0, 2026-09-06
 
 **Additive: `redact(_:passes:)` lets a caller choose which passes run.** The existing

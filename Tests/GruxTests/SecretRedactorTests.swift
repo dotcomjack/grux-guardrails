@@ -1289,11 +1289,24 @@ final class RedactionPassesTests: XCTestCase {
     /// so the labelled pass takes the value beside it. That is right for an HTTP session
     /// token and wrong for an opaque local handle in an error message the caller wrote.
     func testEvidenceOnlyLeavesALocalIdentifierAlone() {
-        let line = "error: session '9f2b1ac0d4e6f8a1b3c5d7e9f0a2b4c6' not found (maybe already ended)"
+        // THE REAL SHAPE, and getting it wrong is instructive. `session 'x'` is NOT
+        // taken: whitespace is the weakest separator and `session` is deliberately not
+        // in `whitespaceSeparableNames`. What Grux actually emits is `session_id: x`,
+        // where the colon is a strong separator and the labelled pass fires. The first
+        // version of this test used the whitespace form, asserted a precondition that was
+        // false, and shipped red in 0.8.0.
+        let line = "session_id: sh-20260906-143022-a1b2c3"
         XCTAssertNotEqual(SecretRedactor.redact(line), line,
                           "precondition: the full pass set is expected to take this id")
         XCTAssertEqual(SecretRedactor.redact(line, passes: .evidenceOnly), line,
                        "evidenceOnly took an identifier it has no evidence about")
+
+        // And the whitespace form, pinned so the asymmetry is on the record rather than
+        // rediscovered by the next person who writes this test the obvious way.
+        let spaced = "error: session 'sh-20260906-143022-a1b2c3' not found"
+        XCTAssertEqual(SecretRedactor.redact(spaced), spaced,
+                       "whitespace-separated `session` started being taken; if that is "
+                       + "deliberate, add `session` to whitespaceSeparableNames knowingly")
     }
 
     /// Evidence-only is not a way to turn redaction off. A known credential FORMAT is
