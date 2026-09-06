@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.2, 2026-09-06
+
+**A whole class of labelled secret was reaching the output: single case, no digits.**
+`PGPASSWORD=tigertigertiger`, `REDIS_PASSWORD=opensesameopensesame` and
+`DB_PASSWORD=correcthorsebattery` were all emitted verbatim.
+
+`looksLikeACredentialValue` required a digit, or mixed case, or punctuation at twenty
+characters. Its own comment observed that every entry in the leak corpus qualifies on a
+digit or on mixed case, which is true, and which is precisely why this survived: the
+corpus contained no all-lowercase secret, so nothing ever measured the rule against the
+shape it rejects. A comment noting that all your evidence points one way is a comment
+describing a blind spot.
+
+The fix is gated on the separator rather than loosening the rule everywhere. A solid run
+of twelve or more letters, no digit and no punctuation, after `=` or `:` and a
+credential-shaped name, is now a credential. Whitespace-separated values are unchanged,
+because that is the shape that ate `see the auth README.md`.
+
+**PURE LETTERS IS THE LOAD-BEARING PART.** The first attempt allowed any non-space run and
+the benign corpus rejected it in one run, with exactly the three shapes the old comment
+predicted: `key.anthropic`, `projects_json`, `release-upload-key`. All three are
+identifiers, and an identifier earns its readability from `.`, `_` and `-`. A
+human-chosen password does not have them. Those three are now named test cases.
+
+Found by an adversarial review of the downstream Grux integration, not by this repo's own
+suite. 124 tests, 0 failures, benign corpus 0 of 64 mangled, leak corpus 0 survivors.
+
 ## 0.8.1, 2026-09-06
 
 **`Sources/` is byte identical to 0.8.0. One test was wrong and it shipped red.**

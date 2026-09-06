@@ -412,7 +412,8 @@ public enum SecretRedactor {
             // the time we get here, and without this guard the scanner treats that marker
             // as the value and replaces it with a less precise tag. That destroys both
             // load-bearing properties at once: the specific tag, and idempotence.
-            guard !value.hasPrefix("[REDACTED:"), looksLikeACredentialValue(value) else {
+            guard !value.hasPrefix("[REDACTED:"),
+                  looksLikeACredentialValue(value, afterStrongSeparator: !separatorWasWhitespaceOnly) else {
                 skipRun(); continue
             }
             if separatorWasWhitespaceOnly, looksLikeALocator(value) { skipRun(); continue }
@@ -514,7 +515,11 @@ public enum SecretRedactor {
     /// and eating every config file an agent reads. `tokenizer=wordpiece` and
     /// `authors=alice,bob` both contain credential words in the NAME, so the VALUE has to
     /// carry the decision. A real credential is long and is not a plain lowercase word.
-    private static func looksLikeACredentialValue(_ v: String) -> Bool {
+    /// - Parameter afterStrongSeparator: the value followed `=`, `:` or a call paren,
+    ///   rather than bare whitespace. A strong separator plus a credential-shaped name is
+    ///   a much better signal than either alone, and it is what lets the single-case rule
+    ///   below be safe.
+    private static func looksLikeACredentialValue(_ v: String, afterStrongSeparator: Bool = false) -> Bool {
         guard v.count >= 8 else { return false }
         var hasDigit = false, hasUpper = false, hasLower = false, hasSymbol = false
         for c in v {
@@ -533,7 +538,43 @@ public enum SecretRedactor {
         // eating `"key": "projects_json"` out of every blueprint and `key.anthropic` out
         // of every config enum. Twenty is measured, not guessed: it takes the project's
         // own 8,590 lines from 0.547% destroyed to 0.396% with the leak corpus unmoved.
-        return hasSymbol && v.count >= 20
+        if hasSymbol && v.count >= 20 { return true }
+
+        // SINGLE CASE, NO DIGIT, AFTER A STRONG SEPARATOR. Added 2026-09-06 because the
+        // rule above let a real class of credential through and the corpus could not see
+        // it: the comment says every leak-corpus entry qualifies on a digit or mixed case,
+        // which is true, and which means the corpus never contained this shape.
+        //
+        // `PGPASSWORD=tigertigertiger`, `REDIS_PASSWORD=opensesameopensesame` and
+        // `DB_PASSWORD=correcthorsebattery` all reached the model verbatim. That is a
+        // human-chosen password, and `env` is the command it arrives in.
+        //
+        // Safe here and NOT safe in general, which is why it is gated on the separator.
+        // `password hunter2` is whitespace-separated and stays rejected, because that is
+        // the shape that ate `see the auth README.md`. What this accepts is a
+        // credential-shaped NAME, then `=` or `:`, then twelve or more unbroken non-space
+        // characters. A lowercase dictionary word is still not a secret, but a lowercase
+        // dictionary word is not what sits on the right of `PGPASSWORD=` either.
+        //
+        // PURE LETTERS, and that is the whole of what makes this safe. The first attempt
+        // allowed any non-space run and the benign corpus rejected it immediately, with
+        // exactly the three shapes the paragraph above predicts:
+        //
+        //     case keyAnthropic = "key.anthropic"
+        //     "key": "projects_json"
+        //     signingKeyAlias = "release-upload-key"
+        //
+        // All three are IDENTIFIERS, and an identifier earns its readability from `.`,
+        // `_` and `-`. A human-chosen password does not have them. So the rule is a solid
+        // run of letters with no digit, no punctuation and no space: `tigertigertiger`
+        // qualifies, `release-upload-key` does not, and the separation is structural
+        // rather than a length guess.
+        //
+        // Twelve rather than eight because eight took `password: required` and
+        // `keychain: enabled` out of documentation prose.
+        if afterStrongSeparator, !hasSymbol, !hasDigit, v.count >= 12 { return true }
+
+        return false
     }
 
     // MARK: - Credentials inside URLs

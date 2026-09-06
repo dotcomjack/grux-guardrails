@@ -1331,3 +1331,60 @@ final class RedactionPassesTests: XCTestCase {
                           "the labelled pass alone should take it")
     }
 }
+
+/// Single-case labelled values, the class the corpus could not see.
+///
+/// `looksLikeACredentialValue` required a digit or mixed case, and its comment noted that
+/// every entry in the leak corpus qualified on one of those. That was true, and it is
+/// exactly why the gap survived: the corpus had no all-lowercase secret in it, so nothing
+/// measured the rule against the shape it rejects.
+///
+/// Found 2026-09-06 by an adversarial review of the Grux integration. `shell_run "env"`
+/// returned `PGPASSWORD=tigertigertiger` verbatim to the model.
+final class SingleCaseLabelledValueTests: XCTestCase {
+
+    /// A human-chosen password: one case, no digits, no punctuation.
+    func testAllLowercaseLabelledValuesAreRedacted() {
+        for line in ["PGPASSWORD=tigertigertiger",
+                     "REDIS_PASSWORD=opensesameopensesame",
+                     "DB_PASSWORD=correcthorsebattery",
+                     "API_KEY=abcdefghijklmnop",
+                     "password: correcthorsebattery"] {
+            XCTAssertNotEqual(SecretRedactor.redact(line), line,
+                              "a single-case labelled value reached the output: \(line)")
+        }
+    }
+
+    func testAllUppercaseLabelledValuesAreRedacted() {
+        let line = "DB_PASSWORD=CORRECTHORSEBATTERY"
+        XCTAssertNotEqual(SecretRedactor.redact(line), line, "uppercase-only value survived")
+    }
+
+    /// THE THREE THE BENIGN CORPUS CAUGHT on the first attempt, kept here as named cases
+    /// so the reason the rule is shaped this way survives the next edit. Each is an
+    /// identifier, and an identifier earns readability from `.`, `_` and `-`.
+    func testIdentifiersBesideACredentialWordAreNotRedacted() {
+        for line in [#"case keyAnthropic = "key.anthropic""#,
+                     #""key": "projects_json","#,
+                     #"signingKeyAlias = "release-upload-key""#] {
+            XCTAssertEqual(SecretRedactor.redact(line), line, """
+                An identifier was destroyed: \(line)
+                The single-case rule must stay restricted to a solid run of letters. If \
+                this fires, something widened it to allow punctuation.
+                """)
+        }
+    }
+
+    /// The whitespace separator stays rejected. That is the shape that ate a filename.
+    func testWhitespaceSeparatedSingleCaseIsStillRejected() {
+        let line = "see the auth README and the password section"
+        XCTAssertEqual(SecretRedactor.redact(line), line, "prose was destroyed: \(line)")
+    }
+
+    /// Below the floor, so documentation prose survives.
+    func testShortSingleCaseValuesAreNotRedacted() {
+        for line in ["password: required", "keychain: enabled"] {
+            XCTAssertEqual(SecretRedactor.redact(line), line, "prose destroyed: \(line)")
+        }
+    }
+}
