@@ -201,26 +201,81 @@ public enum SecretRedactor {
     /// the separator meant every `Authorization: Bearer ...` header leaked in full.
     private static let authSchemes = ["bearer", "basic", "digest", "token", "apikey", "key"]
 
+    /// Which passes `redact` runs.
+    ///
+    /// Added 0.8.0 for a caller that redacts its OWN control-plane strings, not just
+    /// untrusted input. Grux runs every shell tool result through the redactor a second
+    /// time as defence in depth, and that string carries session ids, snapshot ids and
+    /// error messages it wrote itself. The inferring passes eat those: `session` is in
+    /// `credentialWords` on purpose, because an HTTP session identifier IS a credential,
+    /// so `session 'a1b2c3' not found` came back as `session '[REDACTED:ASSIGNED_SECRET]'
+    /// not found` and the message stopped being actionable.
+    ///
+    /// `.all` is the default and is what untrusted input should get. Nothing about the
+    /// existing behaviour changes.
+    public struct Passes: OptionSet, Sendable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+
+        /// The provider prefix table. A match here is a known credential FORMAT, so it is
+        /// evidence rather than inference and it cannot fire on an opaque local id.
+        public static let branded = Passes(rawValue: 1 << 0)
+        /// `https://user:pass@host`, and `curl -u user:pass`.
+        public static let urlCredentials = Passes(rawValue: 1 << 1)
+        /// `PASSWORD=...`, `apiKey: "..."`. Infers from the NAME beside the value.
+        public static let labelled = Passes(rawValue: 1 << 2)
+        /// `Authorization: Bearer <token>` with no name of its own.
+        public static let schemeLed = Passes(rawValue: 1 << 3)
+        /// Long high-entropy runs. Infers from SHAPE alone and is the pass most likely to
+        /// take an identifier that merely looks random.
+        public static let entropy = Passes(rawValue: 1 << 4)
+
+        /// Everything. The default, and the right answer for untrusted input.
+        public static let all: Passes = [.branded, .urlCredentials, .labelled, .schemeLed, .entropy]
+        /// Known credential formats only, nothing inferred from name or shape. For a
+        /// string you generated yourself and are re-checking, where a false positive
+        /// destroys your own identifiers and there is no attacker-controlled name to
+        /// infer from.
+        public static let evidenceOnly: Passes = [.branded, .urlCredentials]
+    }
+
     /// Replace every secret-shaped token in `input` with `[REDACTED:KIND]`.
     /// Safe to call repeatedly on its own output.
     public static func redact(_ input: String) -> String {
+        redact(input, passes: .all)
+    }
+
+    /// Replace every secret-shaped token in `input`, running only `passes`.
+    public static func redact(_ input: String, passes: Passes) -> String {
         var out = input
+        guard passes.contains(.branded) else {
+            if passes.contains(.urlCredentials) {
+                out = redactURLCredentials(in: out)
+                out = redactBasicAuthFlags(in: out)
+            }
+            if passes.contains(.labelled) { out = redactLabelledValues(in: out) }
+            if passes.contains(.schemeLed) { out = redactSchemeLedTokens(in: out) }
+            if passes.contains(.entropy) { out = replaceHighEntropy(in: out) }
+            return out
+        }
         for (tag, regex) in patterns {
             out = replaceAll(in: out, regex: regex, with: "[REDACTED:\(tag)]")
         }
         // After the provider prefixes, so a recognised key keeps its own precise tag, and
         // before the entropy pass, so a labelled value is caught even when it is too
         // short or too single-case for the generic rule to see it.
-        out = redactURLCredentials(in: out)
-        out = redactBasicAuthFlags(in: out)
-        out = redactLabelledValues(in: out)
+        if passes.contains(.urlCredentials) {
+            out = redactURLCredentials(in: out)
+            out = redactBasicAuthFlags(in: out)
+        }
+        if passes.contains(.labelled) { out = redactLabelledValues(in: out) }
         // After the labelled pass, deliberately. A header that carries its own name keeps
         // the more precise ASSIGNED_SECRET tag; this only picks up the naked case, a line
         // that opens with the scheme and nothing else, which is how `curl -v` and most
         // request logs print it. Lowercase hex is the common shape there and the entropy
         // pass cannot see it, because that rule needs mixed case.
-        out = redactSchemeLedTokens(in: out)
-        out = replaceHighEntropy(in: out)
+        if passes.contains(.schemeLed) { out = redactSchemeLedTokens(in: out) }
+        if passes.contains(.entropy) { out = replaceHighEntropy(in: out) }
         return out
     }
 

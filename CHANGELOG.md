@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.8.0, 2026-09-06
+
+**Additive: `redact(_:passes:)` lets a caller choose which passes run.** The existing
+`redact(_:)` is unchanged and runs everything, so no behaviour moved for any current
+caller.
+
+The redactor has five passes and they are not the same KIND of judgement. Two work from
+evidence: a known provider key format, or a `user:pass@` URL. Three infer: from a name
+next to the value, from an auth scheme, or from shape alone. Inference is what makes the
+redactor good, and it is also what makes it unsafe to run twice over a string the caller
+wrote itself.
+
+Grux found this the hard way. It runs every shell tool result through the redactor a
+second time as defence in depth, and that string carries its own session ids. `session`
+is in `credentialWords` deliberately, because an HTTP session identifier is exactly what
+a stolen cookie replays, so:
+
+```
+session_id: sh-20260906-143022-a1b2c3   ->   session_id: [REDACTED:ASSIGNED_SECRET]
+```
+
+Every call after that failed with `session '[REDACTED:ASSIGNED_SECRET]' not found`. The
+rule was right and the second application was wrong.
+
+```swift
+SecretRedactor.redact(untrustedInput)                          // unchanged, all five
+SecretRedactor.redact(ownOutput, passes: .evidenceOnly)        // branded + URL credentials
+SecretRedactor.redact(text, passes: [.branded, .entropy])      // or any combination
+```
+
+`.evidenceOnly` is not a way to turn redaction down. A branded Anthropic key and a
+`user:pass@` URL still go, because a known credential FORMAT is evidence rather than
+inference. Four tests cover it, including that the default is byte identical to
+`.all` and that a single pass can run alone.
+
+119 tests, 0 failures.
+
 ## 0.7.0, 2026-09-06
 
 **Breaking, and it is the only change: the module is renamed from `Grux` to
