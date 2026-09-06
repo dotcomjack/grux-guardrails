@@ -1,5 +1,5 @@
 import XCTest
-@testable import Grux
+@testable import GruxGuardrails
 
 /// Every credential-looking string in this file is synthetic. They are fixtures, not
 /// leaks, and they are short on purpose: a real key of any provider is far longer than
@@ -506,10 +506,10 @@ final class SecretRedactorTests: XCTestCase {
         let goodPrimary = """
         ```swift
         // Package.swift
-        .package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")
-        .product(name: "Grux", package: "grux-guardrails")
+        .package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.7.0")
+        .product(name: "GruxGuardrails", package: "grux-guardrails")
         // then, in your source
-        import Grux
+        import GruxGuardrails
         ```
         """
         let goodManifest = """
@@ -520,9 +520,9 @@ final class SecretRedactorTests: XCTestCase {
         let package = Package(
             name: "YourAgent",
             platforms: [.macOS(.v14)],
-            dependencies: [.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")],
+            dependencies: [.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.7.0")],
             targets: [.target(name: "YourAgent",
-                              dependencies: [.product(name: "Grux", package: "grux-guardrails")])]
+                              dependencies: [.product(name: "GruxGuardrails", package: "grux-guardrails")])]
         )
         ```
         """
@@ -532,16 +532,30 @@ final class SecretRedactorTests: XCTestCase {
              goodPrimary.replacingOccurrences(of: "dotcomjack/grux-guardrails.git", with: "someoneelse/grux-guardrails.git")
                  + "\n" + goodManifest,
              "repository"),
+            // THREE ERAS NOW, so each mutation has to name the era it is testing.
+            // GruxKit below 0.6.0, Grux from 0.6.0, GruxGuardrails from 0.7.0.
             ("primary snippet asks for Grux at a GruxKit-only version",
-             goodPrimary.replacingOccurrences(of: "0.6.2", with: "0.5.0") + "\n" + goodManifest,
+             goodPrimary.replacingOccurrences(of: "\"GruxGuardrails\", package:", with: "\"Grux\", package:")
+                 .replacingOccurrences(of: "import GruxGuardrails", with: "import Grux")
+                 .replacingOccurrences(of: "0.7.0", with: "0.5.0") + "\n" + goodManifest,
              "only ships GruxKit"),
             ("primary snippet asks for GruxKit at a post-rename version",
-             goodPrimary.replacingOccurrences(of: "\"Grux\", package:", with: "\"GruxKit\", package:")
-                 .replacingOccurrences(of: "import Grux", with: "import GruxKit")
+             goodPrimary.replacingOccurrences(of: "\"GruxGuardrails\", package:", with: "\"GruxKit\", package:")
+                 .replacingOccurrences(of: "import GruxGuardrails", with: "import GruxKit")
                  + "\n" + goodManifest,
              "renamed it to Grux"),
+            // The two rules the 0.7.0 rename added. A rule with no control is a rule
+            // nobody has watched fail, which is the whole reason this block exists.
+            ("primary snippet asks for Grux at a GruxGuardrails-only version",
+             goodPrimary.replacingOccurrences(of: "\"GruxGuardrails\", package:", with: "\"Grux\", package:")
+                 .replacingOccurrences(of: "import GruxGuardrails", with: "import Grux")
+                 + "\n" + goodManifest,
+             "renamed it to GruxGuardrails"),
+            ("primary snippet asks for GruxGuardrails at a pre-rename version",
+             goodPrimary.replacingOccurrences(of: "0.7.0", with: "0.6.2") + "\n" + goodManifest,
+             "predates the rename"),
             ("primary snippet admits a tag that leaks credentials",
-             goodPrimary.replacingOccurrences(of: "0.6.2", with: "0.3.1") + "\n" + goodManifest,
+             goodPrimary.replacingOccurrences(of: "0.7.0", with: "0.3.1") + "\n" + goodManifest,
              "leak credentials"),
             ("manifest has no tools-version pragma",
              goodPrimary + "\n"
@@ -629,6 +643,14 @@ final class SecretRedactorTests: XCTestCase {
         // renamed the product from GruxKit to Grux.
         let firstCleanTag = versionOrder("0.5.0")
         let renameTag = versionOrder("0.6.0")
+        // 0.7.0 renamed the module a SECOND time, GruxKit -> Grux -> GruxGuardrails.
+        // The second rename was forced rather than chosen: the application target in
+        // dotcomjack/grux is also called `Grux`, so a module of that name here could not
+        // be linked into the app at all. SwiftPM's `moduleAliases` cannot rescue it,
+        // because aliasing is unavailable when the ROOT package owns the clashing name.
+        // Measured 2026-09-06: "error: multiple similar targets 'Grux' appear in package
+        // 'aliastest' and 'grux-guardrails'".
+        let guardrailsRenameTag = versionOrder("0.7.0")
 
         let blocks = readme.components(separatedBy: "```swift")
             .dropFirst()
@@ -694,10 +716,13 @@ final class SecretRedactorTests: XCTestCase {
                                 + "repository (\(url)):\n\(shown)")
             }
 
-            // GruxKit is tested first because `import Grux` is a prefix of `import GruxKit`,
-            // so asking the other question first misreads every GruxKit snippet.
-            let namesGruxKit = block.contains("GruxKit")
-            let namesGrux = !namesGruxKit
+            // LONGEST NAME FIRST, and this is the whole trick. `Grux` is a prefix of both
+            // `GruxKit` and `GruxGuardrails`, so asking "does it say Grux" before the other
+            // two misreads every snippet from either of the other eras. Three names now,
+            // so the ordering matters more than it did with two.
+            let namesGuardrails = block.contains("GruxGuardrails")
+            let namesGruxKit = !namesGuardrails && block.contains("GruxKit")
+            let namesGrux = !namesGuardrails && !namesGruxKit
                 && (block.contains("product(name: \"Grux\"") || block.contains("import Grux"))
 
             for floor in quotedValues(after: "from: \"", in: block) {
@@ -714,6 +739,16 @@ final class SecretRedactorTests: XCTestCase {
                 if namesGruxKit && order >= renameTag {
                     problems.append("an install snippet asks for the GruxKit product at "
                                     + "\(floor), a version that renamed it to Grux:\n\(shown)")
+                }
+                if namesGrux && order >= guardrailsRenameTag {
+                    problems.append("an install snippet asks for the Grux product at "
+                                    + "\(floor), a version that renamed it to "
+                                    + "GruxGuardrails:\n\(shown)")
+                }
+                if namesGuardrails && order < guardrailsRenameTag {
+                    problems.append("an install snippet asks for the GruxGuardrails product "
+                                    + "while admitting \(floor), a version that predates the "
+                                    + "rename and only ships Grux:\n\(shown)")
                 }
             }
 
@@ -1068,7 +1103,7 @@ final class ReadmeClaimsTests: XCTestCase {
         let source = try String(
             contentsOf: URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-                .appendingPathComponent("Sources/Grux/Security/SecretRedactor.swift"),
+                .appendingPathComponent("Sources/GruxGuardrails/Security/SecretRedactor.swift"),
             encoding: .utf8)
         guard let block = source.range(of: "let raw: [(String, String)] = ["),
               let end = source.range(of: "return raw", range: block.upperBound..<source.endIndex) else {
