@@ -1268,3 +1268,53 @@ extension SecretRedactorTests {
         }
     }
 }
+
+/// The selective-pass API added in 0.8.0.
+///
+/// It exists for a caller redacting its OWN control-plane strings a second time, where a
+/// pass that infers from a NAME or a SHAPE destroys identifiers the caller generated.
+final class RedactionPassesTests: XCTestCase {
+
+    /// The default did not move. Every existing caller gets exactly what it got before.
+    func testTheDefaultIsEveryPass() {
+        for s in ["DB_PASS=hunter2secret",
+                  "sk-ant-api03-ABCDEF0123456789abcdef",
+                  "https://user:hunter2secret@example.com/x"] {
+            XCTAssertEqual(SecretRedactor.redact(s), SecretRedactor.redact(s, passes: .all),
+                           "redact(_:) diverged from redact(_:passes: .all) on: \(s)")
+        }
+    }
+
+    /// THE CASE THE API WAS ADDED FOR. `session` is in `credentialWords` deliberately,
+    /// so the labelled pass takes the value beside it. That is right for an HTTP session
+    /// token and wrong for an opaque local handle in an error message the caller wrote.
+    func testEvidenceOnlyLeavesALocalIdentifierAlone() {
+        let line = "error: session '9f2b1ac0d4e6f8a1b3c5d7e9f0a2b4c6' not found (maybe already ended)"
+        XCTAssertNotEqual(SecretRedactor.redact(line), line,
+                          "precondition: the full pass set is expected to take this id")
+        XCTAssertEqual(SecretRedactor.redact(line, passes: .evidenceOnly), line,
+                       "evidenceOnly took an identifier it has no evidence about")
+    }
+
+    /// Evidence-only is not a way to turn redaction off. A known credential FORMAT is
+    /// evidence, not inference, and it still goes.
+    func testEvidenceOnlyStillTakesAKnownCredentialFormat() {
+        let key = "sk-ant-api03-ABCDEF0123456789abcdef"
+        let out = SecretRedactor.redact("token \(key) end", passes: .evidenceOnly)
+        XCTAssertFalse(out.contains(key), "evidenceOnly let a branded Anthropic key through: \(out)")
+
+        let url = "https://bot:hunter2secret@example.com/x"
+        XCTAssertFalse(SecretRedactor.redact(url, passes: .evidenceOnly).contains("hunter2secret"),
+                       "evidenceOnly let URL credentials through")
+    }
+
+    /// Each pass can be selected alone, so the set is a real option set rather than two
+    /// hardcoded modes wearing one.
+    func testASinglePassRunsAlone() {
+        let labelled = "DB_PASS=hunter2secret"
+        XCTAssertEqual(SecretRedactor.redact(labelled, passes: .branded), labelled,
+                       "the branded pass alone should not touch a labelled value")
+        XCTAssertNotEqual(SecretRedactor.redact(labelled, passes: .labelled), labelled,
+                          "the labelled pass alone should take it")
+    }
+}
