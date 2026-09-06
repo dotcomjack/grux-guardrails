@@ -11,7 +11,7 @@ Guardrails for desktop AI agents, in Swift. MIT licensed. Short version: [gruxai
 SecretRedactor.redact  "deploy with sk-ant-api03-..."  ->  "deploy with [REDACTED:ANTHROPIC_KEY]"
 URLGuard.evaluate      "http://[64:ff9b::7f00:1]/"     ->  denied, tag PRIVATE_NETWORK
 
-115 tests, 0 failures, on macOS 14 and macOS 15.  26 patterns.  0 external packages.
+125 tests, 0 failures, on macOS 14 and macOS 15.  26 patterns.  0 external packages.
 2 of 814 real paths mangled.  40 of 9,323 corpus lines leaked.  6 of 9 tags leak credentials.
 ```
 
@@ -80,7 +80,7 @@ version, with every line below pinned by a test so it cannot drift quietly:
   and also its teeth.
 
 **There is no fuzz target, and fuzzing is not yet performed.** The adversarial corpus is
-what stands in for it: 115 tests, table-driven, with the must-stay-redacted cases sitting
+what stands in for it: 125 tests, table-driven, with the must-stay-redacted cases sitting
 in the same file as the must-survive cases so the trade cannot drift in one direction
 unnoticed. Three of those tests are honest known-defect expectations rather than passes.
 
@@ -578,7 +578,7 @@ regression test.
 
 Nothing here asks to be believed. Every claim in this section is one command.
 
-**115 tests, 0 failures**, on macOS 14 and macOS 15, which is the CI matrix. Run
+**125 tests, 0 failures**, on macOS 14 and macOS 15, which is the CI matrix. Run
 `swift test`. Count them with `grep -rho 'func test' Tests/ | wc -l`. There is no coverage
 percentage anywhere in this repo on purpose: a high one is easy to reach with weak tests,
 and the corpus files are the honest artifact instead. What is in those corpora, how they
