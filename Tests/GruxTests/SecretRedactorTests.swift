@@ -506,8 +506,8 @@ final class SecretRedactorTests: XCTestCase {
         let goodPrimary = """
         ```swift
         // Package.swift
-        .package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")
-        .product(name: "Grux", package: "grux")
+        .package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")
+        .product(name: "Grux", package: "grux-guardrails")
         // then, in your source
         import Grux
         ```
@@ -520,16 +520,16 @@ final class SecretRedactorTests: XCTestCase {
         let package = Package(
             name: "YourAgent",
             platforms: [.macOS(.v14)],
-            dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")],
+            dependencies: [.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")],
             targets: [.target(name: "YourAgent",
-                              dependencies: [.product(name: "Grux", package: "grux")])]
+                              dependencies: [.product(name: "Grux", package: "grux-guardrails")])]
         )
         ```
         """
 
         let cases: [(String, String, String)] = [
             ("primary snippet points at the wrong repository",
-             goodPrimary.replacingOccurrences(of: "dotcomjack/grux.git", with: "someoneelse/grux.git")
+             goodPrimary.replacingOccurrences(of: "dotcomjack/grux-guardrails.git", with: "someoneelse/grux-guardrails.git")
                  + "\n" + goodManifest,
              "repository"),
             ("primary snippet asks for Grux at a GruxKit-only version",
@@ -557,7 +557,7 @@ final class SecretRedactorTests: XCTestCase {
              "omits platforms"),
             ("an install call sits in prose where the block scan cannot reach it",
              goodPrimary + "\n" + goodManifest
-                 + "\n\nOr add `.package(url: \"https://github.com/dotcomjack/grux.git\", "
+                 + "\n\nOr add `.package(url: \"https://github.com/dotcomjack/grux-guardrails.git\", "
                  + "from: \"0.6.2\")` to your own manifest.\n",
              "outside any fenced swift block"),
             ("the whole-manifest example disappeared",
@@ -669,8 +669,27 @@ final class SecretRedactorTests: XCTestCase {
         for block in installBlocks {
             let shown = block.trimmingCharacters(in: .whitespacesAndNewlines)
 
+            // `grux-guardrails`, NOT `grux`. Do not "simplify" this back.
+            //
+            // 0.6.0 announced that the package was moving to `github.com/dotcomjack/grux`
+            // and every document in this repository was rewritten as though it had. The
+            // move never happened: that name was taken on 2026-08-18 by the macOS app,
+            // which has no root `Package.swift` at all, and this package stayed here.
+            //
+            // This line then pinned the move that did not happen. A guard whose whole job
+            // is "the install snippet points at the real repository" spent from 0.6.0 to
+            // 2026-09-06 REQUIRING the wrong one, so the documented install line was
+            // unresolvable in 20 places and the suite was green over all of them.
+            //
+            // Measured 2026-09-06, `swift package resolve` against each form:
+            //   dotcomjack/grux.git             error: no versions of 'grux' match 0.6.2..<1.0.0
+            //   dotcomjack/grux-guardrails.git  Computed at 0.6.2, build complete
+            //
+            // Same shape as the defect 0.3.1 disclosed, where a test asserted a leak was
+            // correct output. CONTRIBUTING forbids that with an equality assertion; this
+            // was the `where` clause version of it, and no rule covered that.
             for url in quotedValues(after: ".package(url: \"", in: block)
-            where !url.contains("dotcomjack/grux.git") {
+            where !url.contains("dotcomjack/grux-guardrails.git") {
                 problems.append("an install snippet points somewhere other than the real "
                                 + "repository (\(url)):\n\(shown)")
             }

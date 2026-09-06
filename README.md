@@ -1,7 +1,7 @@
 
 # Grux
 
-[![CI](https://github.com/dotcomjack/grux/actions/workflows/ci.yml/badge.svg)](https://github.com/dotcomjack/grux/actions/workflows/ci.yml)
+[![CI](https://github.com/dotcomjack/grux-guardrails/actions/workflows/ci.yml/badge.svg)](https://github.com/dotcomjack/grux-guardrails/actions/workflows/ci.yml)
 [![Licence](https://img.shields.io/badge/licence-MIT-8C6A2F)](LICENSE)
 
 
@@ -38,8 +38,8 @@ promised as shipped that is not.
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")
-.product(name: "Grux", package: "grux")
+.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")
+.product(name: "Grux", package: "grux-guardrails")
 // then, in your source
 import Grux
 ```
@@ -153,10 +153,10 @@ let package = Package(
     name: "YourAgent",
     platforms: [.macOS(.v14)],
     products: [.library(name: "YourAgent", targets: ["YourAgent"])],
-    dependencies: [.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")],
+    dependencies: [.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")],
     targets: [
         .target(name: "YourAgent",
-                dependencies: [.product(name: "Grux", package: "grux")]),
+                dependencies: [.product(name: "Grux", package: "grux-guardrails")]),
     ]
 )
 ```

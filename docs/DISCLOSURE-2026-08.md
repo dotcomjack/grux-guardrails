@@ -48,7 +48,7 @@ grep -A3 -i grux Package.resolved
 Then pin forward:
 
 ```swift
-.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.2")
+.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.2")
 ```
 
 **The module was renamed, so this is not a drop-in bump from `0.5.0` or earlier.** It is

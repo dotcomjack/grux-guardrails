@@ -91,8 +91,8 @@ ordinary config lines whose field name merely contains a credential word, includ
 **Breaking, and it is the only change: the module is renamed from `GruxKit` to `Grux`.**
 Every consumer's `import GruxKit` stops compiling and becomes `import Grux`. The package
 identity changes with it, so `.product(name: "GruxKit", package: "grux-kit")` becomes
-`.product(name: "Grux", package: "grux")`, and the repository moves to
-`github.com/dotcomjack/grux`.
+`.product(name: "Grux", package: "grux-guardrails")`, and the repository moves to
+`github.com/dotcomjack/grux-guardrails`.
 
 Migration is two lines and there is no behaviour change to test against:
 
@@ -101,8 +101,8 @@ Migration is two lines and there is no behaviour change to test against:
 .product(name: "GruxKit", package: "grux-kit")
 
 // after, 0.6.0
-.package(url: "https://github.com/dotcomjack/grux.git", from: "0.6.0")
-.product(name: "Grux", package: "grux")
+.package(url: "https://github.com/dotcomjack/grux-guardrails.git", from: "0.6.0")
+.product(name: "Grux", package: "grux-guardrails")
 ```
 
 Be precise about what breaks, because `from:` is a range and not a pin. `from: "0.6.0"`
