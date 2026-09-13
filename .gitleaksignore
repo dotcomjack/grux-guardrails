@@ -1,0 +1,16 @@
+# Findings reviewed by a human on 2026-09-13 and accepted as false positives.
+#
+# These are per-finding fingerprints: commit + path + rule + line. Each suppresses exactly
+# ONE finding at ONE commit. It is not a pattern rule and not a path rule, so the identical
+# text committed again anywhere still fires. Verified 2026-09-13 by re-committing one of the
+# strings below into shipping source: it was detected.
+#
+# This file records that a specific line at a specific commit was read and judged.
+
+# A code comment explaining the whitespace separator, using the canonical joke password:
+# curl -u bot:hunter2Passw0rd
+78790dd41a807c18621e06ef82d6ec45048cef1c:Sources/GruxKit/Security/SecretRedactor.swift:curl-auth-user:318
+
+# Threat-model prose using DD_APP_KEY=0123456789abcdef0123456789abcdef01234567, which is
+# sequential hex chosen to demonstrate which shapes survive redaction.
+1459797f87981c774abfd2e0d74b8e889f1bd534:docs/THREAT-MODEL.md:generic-api-key:192

@@ -1,0 +1,35 @@
+# Gitleaks scope for this repository.
+#
+# WHY THIS EXISTS: This repository IS the secret redactor, so its test corpus contains
+# credential-SHAPED strings deliberately. That is what the code under test matches on.
+# A full-history scan on 2026-09-13 produced 57 findings here and every one was a fixture,
+# a doc comment carrying an illustrative fake value, or a Swift type declaration such as
+# `let privateKey: Curve25519.KeyAgreement.PrivateKey`, which has no value attached.
+#
+# The volume is the risk. A real leak arriving later lands in a pile of known-false alarms
+# and gets skimmed past. This narrows WHERE the scanner looks.
+#
+# It allowlists PATHS ONLY and disables NO rule, so a credential committed anywhere in
+# shipping source still fires. Verified 2026-09-13: a planted ghp_ key in
+# Sources/ is still detected with this config active.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Redactor test corpora. Credential-shaped by design, verified synthetic 2026-09-13."
+paths = [
+  '''(^|/)Tests/''',
+  '''(^|/)SmokeTest\.swift$''',
+]
+
+[[allowlists]]
+description = "Prose. README and CHANGELOG describe key exchange; they carry no keys."
+paths = ['''(^|/)(README|CHANGELOG)\.md$''']
+
+[[allowlists]]
+description = """
+The scanner's own config and ignore list. .gitleaksignore annotates each suppressed
+finding with what it actually is, so it necessarily QUOTES the flagged text. Without
+this, the file that silences false positives generates four of its own. Measured.
+"""
+paths = ['''(^|/)\.gitleaks(ignore|\.toml)$''']
